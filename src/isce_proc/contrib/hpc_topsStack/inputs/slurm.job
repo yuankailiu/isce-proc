@@ -1,0 +1,102 @@
+#!/bin/bash
+
+# Slurm script for tops stack processing, step {step_name}
+# Submit this script with: sbatch <this-filename>
+# For topsStack processing, submit all stages using submit_chained_dependencies.sh script
+
+#SBATCH -A {groupname}                              # pocket to charge
+#SBATCH --time={time}                               # walltime (days-hours:minutes:seconds)
+#SBATCH --nodes={nodes}                             # number of nodes
+#SBATCH --ntasks={ntasks}                           # Total number of tasks
+#SBATCH --cpus-per-task={ncpus_per_task}	        # CPU cores/threads per task
+#SBATCH --gres=gpu:{gres}                           # number of GPUs per node (used for geo2rdr steps)
+#SBATCH --mem-per-cpu={mem}                         # memory per CPU core (Need to fix by trial and error)
+#SBATCH -J "{step_index}_{step_name}_{track}"	    # job name
+#SBATCH --output={log_name}                         # Format of output file (%j = job id)
+#SBATCH --mail-user={mail_user}@caltech.edu         # User email address
+#SBATCH --mail-type=FAIL
+#SBATCH --array=1-{task_id1}%{max_task}             # Throttle a job array by keeping only a certain number of tasks active at a time
+                                                    #  use the %N suffix where N is the number of active tasks.
+
+### Other things we could put into sbatch file
+###  #SBATCH --ntasks-per-node=10           	    # tasks per node
+###  #SBATCH --exclusive                            # Reserve whole node
+
+
+ROWINDEX=$((SLURM_ARRAY_TASK_ID+{row_id0}))
+
+# LOAD MODULES, INSERT CODE, AND RUN YOUR PROGRAMS HERE
+module load cuda/11.3   # the latest working module on hpc is cuda/11.3
+#module load gcc/7.3.0  # don't use any new gcc, simply use CentOS default gcc on hpc
+export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+
+### Any deletion statements get added here by 'stack_sentinel_cmd.sh'
+#_deletion_here
+
+# Store dates/times in different formats
+start_time=`date '+%T'`
+step_start=`date +%s`
+
+
+# Central logfile needs to be supplied as a command line argument via --export when calling sbatch
+# Avoid writing too much to it, issues when multiple jobs are trying to write at the same time
+printf "##########################################################################################\\n" | tee -a $logfile
+printf "####     RUNSTEP {step_num}:  {step_name} \\n" | tee -a $logfile
+printf "####     Step start time:     `date`         \\n" | tee -a $logfile
+printf "####     SLURM_JOB_ID:        $SLURM_JOB_ID    \\n" | tee -a $logfile
+printf "####     SLURM_ARRAY_JOB_ID:  $SLURM_ARRAY_JOB_ID    \\n" | tee -a $logfile
+printf "####     SLURM_ARRAY_TASK_ID: $SLURM_ARRAY_TASK_ID \\n" | tee -a $logfile
+printf "##########################################################################################\\n" | tee -a $logfile
+
+######### Calculate file sizes
+# Just run du for some tasks, to avoid massive slowdown when running hundreds of jobs with 10s of TB of data
+# Need to be careful for jobs with small walltimes - the jobs that are running du can take much longer
+# Can probably just run this for a single job, don't need to do it for multiple array elements
+CHECK_DISK_LIST="{check_disk_list}"
+for task_id in $CHECK_DISK_LIST
+do
+    if [[ $SLURM_ARRAY_TASK_ID -eq $task_id ]]; then
+        # Calculate how much data we have at this stage
+        printf "####################\\n"
+        printf "####### File sizes\\n"
+        srun du -ch --max-depth=1 ../ # we're executing from 'run_files', use srun for better logging
+        printf "####################\\n"
+
+        # Just output total size of files at this stage to a separate log
+        total_size=$(eval du -ch --max-depth=1 ../ | tail -1 | cut -f 1)
+        fmt_fs="%-35s%-12s%-12s%-12s%-12s\\n"
+        printf "$fmt_fs" "{step_name}"  "{step_num}" "$SLURM_ARRAY_JOB_ID" "$SLURM_ARRAY_TASK_ID" "$total_size" >> total_file_sizes.txt
+    else
+        echo "Not cacluating file sizes for SLURM_ARRAY_TASK_ID: $SLURM_ARRAY_TASK_ID"
+    fi
+done
+
+
+########## Execute topsStack commands
+# Read a line from the command file, using the array task ID as index
+cmd=$(sed "${{ROWINDEX}}q;d" {step_script})
+# Run command
+echo "Running: ${{cmd}}" | tee -a $logfile
+srun $cmd 2>&1 || scancel $SLURM_JOB_ID # If srun returns an error, we cancel the job
+# This stops the chained jobs from carrying on
+# TODO this isn't the best way of reporting errors - we don't get the actual error status reported
+# 2>&1 redirects stderr to stdout,
+# Not writing main output to a central logfile to avoid overlapping output - every array element gets its own file
+
+
+########### Log timings
+step_end=`date +%s`
+step_time=$( echo "$step_end - $step_start" | bc -l )
+Elapsed="$(($step_time / 3600))hrs $((($step_time / 60) % 60))min $(($step_time % 60))sec"
+
+printf "####    Step end time: `date` \\n" | tee -a $logfile
+printf "####    SLURM_ARRAY_TASK_ID: $SLURM_ARRAY_TASK_ID \\n" | tee -a $logfile
+printf "####    Total elapsed: $Elapsed \\n" | tee -a $logfile
+
+## Log timings
+# Timings file is created by submit_chained_dependencies.sh (headers are written there)
+finish_time=`date '+%T'`
+fmt="%-35s%-12s%-12s%-12s%-12s%-12s\\n"
+printf "$fmt" "{step_name}" "$SLURM_ARRAY_JOB_ID" "$SLURM_ARRAY_TASK_ID" "$start_time" "$finish_time" "$Elapsed" >> timings.txt
+# Log timings in Unix format
+printf "$fmt" "{step_name}" "$SLURM_ARRAY_JOB_ID" "$SLURM_ARRAY_TASK_ID" "$step_start" "$step_end" "$step_time" >> time_unix.txt

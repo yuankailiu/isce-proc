@@ -22,6 +22,7 @@ isce.filtStrength       = 0.5                        #[0.0-1.0], auto for 0.5
 isce.unwrapMethod       = snaphu                     #[snaphu / icu], auto for snaphu
 isce.useGPU             = no                         #[yes / no], auto for no
 isce.numProcess         = 4                          #[int>=1], number of processors, auto for 4
+isce.polarization       = vv                         #[vv,hh], auto for vv
 
 ##----------for topsStack only:
 isce.virtualMerge       = no                         #[yes / no], auto for no, use virtual files for the merged SLCs and geometry
@@ -69,6 +70,7 @@ AUTO_DICT = {
     'isce.unwrapMethod'   : 'snaphu',
     'isce.useGPU'         : False,
     'isce.numProcess'     : 4,
+    'isce.polarization'   : 'vv',
 
     #for topsStack only
     'isce.virtualMerge'       : False,

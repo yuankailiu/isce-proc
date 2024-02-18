@@ -463,6 +463,9 @@ def prep_stack(iDict):
         if iDict['paramIonFile']:
             iargs += ['--param_ion', iDict['paramIonFile'], '--num_connections_ion', iDict['numConnectionIon']]
 
+        if iDict['polarization']:
+            iargs += ['--polarization', iDict['polarization']]
+
     else:
         #if iDict['applyWaterMask']:
         #    iargs += ['--applyWaterMask']
