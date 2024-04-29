@@ -12,21 +12,23 @@
 #SBATCH --gres=gpu:{gres}                           # number of GPUs per node (used for geo2rdr steps)
 #SBATCH --mem-per-cpu={mem}                         # memory per CPU core (Need to fix by trial and error)
 #SBATCH -J "{step_index}_{step_name}_{track}"	    # job name
-#SBATCH --output={log_name}                         # Format of output file (%j = job id)
+#SBATCH --output={log_name}                         # Format of output log file (%j = job id)
 #SBATCH --mail-user={mail_user}@caltech.edu         # User email address
-#SBATCH --mail-type=FAIL
-#SBATCH --array=1-{task_id1}%{max_task}             # Throttle a job array by keeping only a certain number of tasks active at a time
-                                                    #  use the %N suffix where N is the number of active tasks.
+#SBATCH --mail-type=END,FAIL                        # Email notification when event types occur
+#SBATCH --array=1-{task_id1}%{max_task}             # Throttle job array at a certain number of active tasks
+#SBATCH --partition={partition}                     # which partition to send the job to, 'expansion' or 'gpu'
 
-### Other things we could put into sbatch file
+
+### ---------------------  optional settings  ----------------------- ###
 ###  #SBATCH --ntasks-per-node=10           	    # tasks per node
 ###  #SBATCH --exclusive                            # Reserve whole node
+### ---------------------  -----------------  ----------------------- ###
 
 
 ROWINDEX=$((SLURM_ARRAY_TASK_ID+{row_id0}))
 
 # LOAD MODULES, INSERT CODE, AND RUN YOUR PROGRAMS HERE
-module load cuda/11.3   # the latest working module on hpc is cuda/11.3
+#module load cuda/11.3   # the latest working module on hpc is cuda/11.3
 #module load gcc/7.3.0  # don't use any new gcc, simply use CentOS default gcc on hpc
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 

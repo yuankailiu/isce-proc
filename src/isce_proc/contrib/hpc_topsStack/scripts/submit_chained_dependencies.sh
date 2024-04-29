@@ -1,6 +1,7 @@
 #!/bin/bash
 set -e
 # Submit a series of scripts to a SLURM job manager, each depending on the previous one finishing correctly
+# Flags: -x submit a step;   -s starting step;    -e ending step
 
 # TODO - remove the debug queue from Sbatch option when running big jobs
 echo 'Submitting topsStack jobs. Make sure that ISCE is loaded or these will fail'
@@ -12,7 +13,26 @@ cur_dir=${PWD}
 cd ${run_dir}
 
 # List of SLURM job scripts that we want to run
-sbatch_files=(`ls *.job`)
+step_exc=0; step_sta=0; step_end=0
+while getopts x:s:e: flag
+do
+    case "${flag}" in
+        x) step_exc=${OPTARG};;  # step to execute (a single step)
+        s) step_sta=${OPTARG};;  # start step (a serial steps)
+        e) step_end=${OPTARG};;  #   end step (a serial steps)
+    esac
+done
+if [ "$step_exe" == 0 ] && [ "$step_sta" == 0 ] && [ "$step_end" == 0 ]; then
+    echo "All steps will be submitted"
+    sbatch_files=(`ls *.job`)
+else
+    if [ "$step_exc" != 0 ]; then step_sta=$step_exc; step_end=$step_exc; fi
+    if [ "$step_sta" == 0 ]; then step_sta=1; fi
+    if [ "$step_end" == 0 ]; then step_end=999; fi
+    if [ "$step_end" -lt "$step_sta" ]; then step_end=$step_sta; fi
+    sbatch_files=(`find run*.job -type f | awk 'match($0,/[0-9]+/,a)&&a[0]>='$step_sta | awk 'match($0,/[0-9]+/,a)&&a[0]<='$step_end`)
+    echo "Starting step: $step_sta"; echo "Ending step  : $step_end";
+fi
 num_file=${#sbatch_files[@]}
 
 # Check that we have all the run_* and .job scripts in this directory before submitting

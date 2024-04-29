@@ -23,7 +23,7 @@ CPUS_PER_NODE_LIM = 56
 # scontrol show config | grep -E 'MaxArraySize|MaxJobCount'
 SLURM_MAX_ARRAY_SIZE = 1000
 
-# max number of tasks in an array run at one time
+# limit the num of tasks in a job array run at once to avoid I/O traffic
 max_task = 200
 
 
@@ -144,6 +144,11 @@ def write_job_scripts(inps):
         mem             = inps.rscDf[inps.rscDf['Step']==step_name]['Mem_per_cpu'].item()
         gres            = inps.rscDf[inps.rscDf['Step']==step_name]['Gres'].item()
 
+        # assign to a HPC partition w/ or w/o gpus
+        # The default partition for The Resnick HPCC will change from “any” (CentOS 7) to “expansion” (RHEL 9) on Tuesday, March 26th.
+        if int(gres) > 0: partition = 'gpu'
+        else: partition = 'expansion'
+
         # Get the number of commands in the script
         cmd_num = len(open(step_script).readlines())
 
@@ -178,13 +183,14 @@ def write_job_scripts(inps):
                 "step_num"          :   step_num,
                 "step_script"       :   step_script,
                 "step_index"        :   index+1,
-                "mail_user"         :   mail_user,              # modify email address if needed
+                "mail_user"         :   mail_user,
                 "row_id0"           :   row_id0,
                 "task_id1"          :   task_id1,
-                "max_task"          :   max_task,               # limit the num of tasks in a job array run at once to avoid I/O traffic
+                "max_task"          :   max_task,
                 "gres"              :   gres,
+                "partition"         :   partition,
                 "mem"               :   mem,
-                "check_disk_list"   :   check_disk,             # count filesize at a task of the slurm array
+                "check_disk_list"   :   check_disk,
                 # "ntasks_per_node" :   row['Ntasks_per_node'],
             }
 

@@ -7,7 +7,7 @@ nproc=4
 
 track=SenAT?  # edit this for your track number
 
-target_dir=/net/marmot.gps.caltech.edu/mnt/tank/nobak/ykliu/aqaba/topsStack/$track/hpc_isce_stack
+target_dir=/net/marmot.gps.caltech.edu/mnt/tank/nobak/ykliu/aqaba/topsStack/$track/hpc_topsStack
 
 
 ##############################
