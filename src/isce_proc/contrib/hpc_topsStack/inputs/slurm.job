@@ -14,7 +14,7 @@
 #SBATCH -J "{step_index}_{step_name}_{track}"	    # job name
 #SBATCH --output={log_name}                         # Format of output log file (%j = job id)
 #SBATCH --mail-user={mail_user}@caltech.edu         # User email address
-#SBATCH --mail-type=END,FAIL                        # Email notification when event types occur
+#SBATCH --mail-type=FAIL                            # Email notification when event types occur
 #SBATCH --array=1-{task_id1}%{max_task}             # Throttle job array at a certain number of active tasks
 #SBATCH --partition={partition}                     # which partition to send the job to, 'expansion' or 'gpu'
 
@@ -43,11 +43,12 @@ step_start=`date +%s`
 # Central logfile needs to be supplied as a command line argument via --export when calling sbatch
 # Avoid writing too much to it, issues when multiple jobs are trying to write at the same time
 printf "##########################################################################################\\n" | tee -a $logfile
-printf "####     RUNSTEP {step_num}:  {step_name} \\n" | tee -a $logfile
-printf "####     Step start time:     `date`         \\n" | tee -a $logfile
-printf "####     SLURM_JOB_ID:        $SLURM_JOB_ID    \\n" | tee -a $logfile
-printf "####     SLURM_ARRAY_JOB_ID:  $SLURM_ARRAY_JOB_ID    \\n" | tee -a $logfile
-printf "####     SLURM_ARRAY_TASK_ID: $SLURM_ARRAY_TASK_ID \\n" | tee -a $logfile
+printf "####     RUNSTEP {step_num}:  {step_name} \\n"            | tee -a $logfile
+printf "####     Step start time:     `date` \\n"                 | tee -a $logfile
+printf "####     SLURM_JOB_ID:        $SLURM_JOB_ID \\n"          | tee -a $logfile
+printf "####     SLURM_ARRAY_JOB_ID:  $SLURM_ARRAY_JOB_ID \\n"    | tee -a $logfile
+printf "####     SLURM_ARRAY_TASK_ID: $SLURM_ARRAY_TASK_ID \\n"   | tee -a $logfile
+printf "####     Host node:           $(hostname) \\n"            | tee -a $logfile
 printf "##########################################################################################\\n" | tee -a $logfile
 
 ######### Calculate file sizes

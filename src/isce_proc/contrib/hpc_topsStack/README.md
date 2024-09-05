@@ -4,6 +4,8 @@
 
 Have ISCE2 topsStack processor [installed](https://github.com/earthdef/sar-proc), and make sure [`stackSentinel.py`](https://github.com/isce-framework/isce2/blob/main/contrib/stack/topsStack/stackSentinel.py) can run (`stackSentinel.py -h`)
 
+Install reportseff from: https://pypi.org/project/reportseff/
+
 ### Overview:
 
 Each job uses SLURM arrays to manage the processing that can be done in parallel. This avoids the issue with wasting resources, hopefully deals better with very large numbers of jobs.

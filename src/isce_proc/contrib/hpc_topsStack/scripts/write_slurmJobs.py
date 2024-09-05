@@ -16,15 +16,29 @@ GROUPNAME = 'simonsgroup'
 # email of the user
 mail_user = os.environ.get("USER")
 
+######################## --------------------  ########################
+########################  YOUR HPC CAPABILITY  ########################
+######################## --------------------  ########################
+
 # Check the nodes/CPUs available in your system. ≤ this many CPUs per node (https://www.hpc.caltech.edu/resources)
 CPUS_PER_NODE_LIM = 56
 
-# max array size of slurm (to break large jobs into multiple sbatch files)
-# scontrol show config | grep -E 'MaxArraySize|MaxJobCount'
+# maximum slurm array size (to break large jobs into multiple sbatch files)
+# due to Caltech HPC limit
+#   MaxArraySize            = 1001
+#   MaxJobCount             = 100000
+# check with: scontrol show config | grep -E 'MaxArraySize|MaxJobCount'
 SLURM_MAX_ARRAY_SIZE = 1000
 
 # limit the num of tasks in a job array run at once to avoid I/O traffic
-max_task = 200
+max_task = 32 # This will be overwritten by the `batch` column defined in your resource.cfg table
+              # depends on the ability of your HPC file system...
+              # 32 is a very conservative number
+              # i like 200 though sometimes it got stuck, especially when competing with others on the same node
+
+######################## --------------------  ########################
+########################  YOUR HPC CAPABILITY  ########################
+######################## --------------------  ########################
 
 
 def cmdLineParse():
@@ -143,6 +157,8 @@ def write_job_scripts(inps):
         ncpus_per_task  = inps.rscDf[inps.rscDf['Step']==step_name]['Ncpus_per_task'].item()
         mem             = inps.rscDf[inps.rscDf['Step']==step_name]['Mem_per_cpu'].item()
         gres            = inps.rscDf[inps.rscDf['Step']==step_name]['Gres'].item()
+        batch           = inps.rscDf[inps.rscDf['Step']==step_name]['batch'].item()
+        max_task = batch
 
         # assign to a HPC partition w/ or w/o gpus
         # The default partition for The Resnick HPCC will change from “any” (CentOS 7) to “expansion” (RHEL 9) on Tuesday, March 26th.
