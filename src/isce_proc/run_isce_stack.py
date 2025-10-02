@@ -6,11 +6,9 @@ import argparse
 import os
 import sys
 
+from isce_proc.utils import config, utils
 from mintpy.objects import sensor
 from mintpy.utils import readfile
-
-from isce_proc.utils import utils, config
-
 
 #####################################################################################
 EXAMPLE = """example:
@@ -41,6 +39,7 @@ def create_parser():
     parser.add_argument('--start', dest='startStep', type=int, help='Start processing at named run number.')
     parser.add_argument('--end', dest='endStep', type=int, help='End processing at named run number.')
 
+    parser.add_argument('--no-orbits', action='store_true', dest='no_orbits', help='Skip downloading orbits.')
     return parser
 
 
@@ -128,7 +127,8 @@ def main(iargs=None):
 
     elif iDict['processor'] == 'topsStack':
         # download Sentinel-1 orbits
-        utils.dload_s1_orbit(iDict)
+        if not inps.no_orbits:
+            utils.dload_s1_orbit(iDict)
 
     # prepare stack processing
     utils.prep_stack(iDict)

@@ -10,7 +10,7 @@ import shutil
 from pathlib import Path
 
 overwrite_bak     = False
-num_connections   = 3
+num_connections   = 5
 connection_bridge = 10
 
 run_dir  = Path('./run_files')
@@ -25,12 +25,17 @@ with open(safefile, 'r') as f:
         date = line.split('/')[-1].split('_')[6][:8]
         if date not in dateList:
             dateList.append(date)
+
+dateList = sorted(dateList)
+print(dateList)
+print(len(dateList))
+
 num_date = len(dateList)
 
 
 # selecting nearest pairs based on dateList and num_connections
 pairList = []
-for i in range(num_date+1):
+for i in range(num_date):
     for j in range(i+1, i+1+connection_bridge):
         if j < num_date:
             if not ((j >= i+1+num_connections) and (j < i+connection_bridge)):

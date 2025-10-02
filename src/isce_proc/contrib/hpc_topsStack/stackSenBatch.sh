@@ -94,7 +94,7 @@ for ((i=0;i<${#target_runfiles[@]};i++)); do
         sbatch_file=${run_file}${fext}
         if [ -f "${sbatch_file}" ]; then
             # use double quote to enable variable usage
-            sed "s/#_deletion_here/if [[ \$SLURM_ARRAY_TASK_ID -eq 1 ]]; then srun .\/clean_topsStack_files.sh ${tops_stack_opt}; fi/g" -i ${sbatch_file}
+            sed "s/#_deletion_here/##if [[ \$SLURM_ARRAY_TASK_ID -eq 1 ]]; then srun .\/clean_topsStack_files.sh ${tops_stack_opt}; fi/g" -i ${sbatch_file}
         fi
     done
 done

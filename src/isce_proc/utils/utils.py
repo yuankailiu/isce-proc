@@ -374,7 +374,7 @@ def dload_s1_orbit(iDict):
     cmd = f'eof --search-path {os.path.abspath("./SLC")} --save-dir {iDict["orbitDir"]} --force-asf'
     status = subprocess.Popen(cmd, shell=True).wait()
     if status != 0:
-        raise RuntimeError("Error in {}".format(sh_file))
+        raise RuntimeError("Error in downloading with sentineleof --force-asf")
     print(f'finished downloading orbits with status {status}')
 
     return
@@ -444,6 +444,15 @@ def prep_stack(iDict):
         if iDict['endDate']:
             t1 = dt.datetime.strptime(iDict['endDate'], '%Y%m%d')
             iargs += ['--stop_date', t1.strftime('%Y-%m-%d')]
+
+        if 'excludeDates' in iDict.keys():
+            tes = iDict.get("excludeDates")
+            print(tes)
+            iargs += ['--exclude_dates', tes]
+
+        if 'includeDates' in iDict.keys():
+            tis = iDict.get("includeDates")
+            iargs += ['--include_dates', tis]
 
         if iDict['swathNum']:
             iargs += ['--swath_num', ' '.join(i for i in iDict['swathNum'].split(','))]

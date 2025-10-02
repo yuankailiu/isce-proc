@@ -26,23 +26,31 @@ Help()
    echo "Options:"
    echo "   -h                : Print this Help."
    echo "   LIST_OF_DELETIONS : append a list of files to delete, see below table:"
-   echo "    ____________________________________________________________________________________________________________________ "
-   echo "      < Deletions >      < Relevant files >     < c# | k# >          < Regex patterns >                                  "
-   echo "    _________________  _________________________ _________ _____________________________________________________________ "
-   echo "    --coreg_overlap    overlap slcs and offsets  5,6| 8    coreg_secondarys/20.*/overlap/IW.*/.*\.(slc|off)              "
-   echo "    --esd              ESD files                  7 | 8    ESD/20.*_20.*/IW.*/.*\.(int|bin|cor|off)                      "
-   echo "    --geom_reference   geometry reference bursts  1 | 12   geom_reference/IW.*/.*\.rdr                                   "
-   echo "    --coarse_igram     coarse ifgrams             7 | 13   coarse_interferograms/20.*_20.*/overlap/IW.*/int_.*\.int      "
-   echo "    --burst_igram      burst ifgrams             13 | 14   interferograms/20.*_20.*/IW.*/fine_.*\.int                    "
-   echo "    --burst_slc        burst SLCs                10 | 15   coreg_secondarys/20.*/IW.*/burst_[0-9][0-9]\.slc              "
-   echo "    --ion_burst_slc    ion burst SLCs            17 | 18   coreg_secondarys/20.*/IW.*/burst_[0-9][0-9]_(lower|upper)\.slc"
-   echo "    --ion_burst_igram  ion burst ifgrams         18 | 19   ion/20.*_20.*/(lower|upper)/interferograms/IW.*/fine_.*\.int  "
-   echo "    --ion_split_igram  ion split-band ifgrams    19 | 22   ion/20.*_20.*/(lower|upper)/merged/.*\.(int|cor|unw|conncomp) "
-   echo "    --coreg_offset     azimuth and range offsets  9 | 22   coreg_secondarys/20.*/IW.*/.*\.off                            "
-   echo "    ____________________________________________________________________________________________________________________ "
-   echo "         c# ; created at   - The step at which those files are created"
-   echo "         k# ; kill after   - The step after completing which is safe to delete those files without obstructing processing"
-   echo "         These steps number are counted in the stackSentinel.py 'interferogram' workflow"
+   echo "    ------------------------------------------------------------------------------------------------------------------------ "
+   echo "      < Deletions >      < Relevant files >       < c# | k# >            < Regex patterns >                                  "
+   echo "    ----------------  ---------------------------  ---------  -------------------------------------------------------------- "
+   echo "    --geom_reference   geometry reference bursts    1 | 12     geom_reference/IW.*/.*\.rdr                                   "
+   echo "    --coarse_igram     coarse ifgrams               7 | 13     coarse_interferograms/20.*_20.*/overlap/IW.*/int_.*\.int      "
+   echo "    --burst_igram      burst ifgrams               13 | 14     interferograms/20.*_20.*/IW.*/fine_.*\.int                    "
+   echo "    --burst_slc        burst SLCs                  10 | 15     coreg_secondarys/20.*/IW.*/burst_[0-9][0-9]\.slc              "
+   echo "    --merged_slc       merged SLCs (if -V=False)   12 | *      merged/SLC/20.*/.*\.slc.full                                  "
+   echo "    --ion_burst_slc    ion burst SLCs              17 | 18     coreg_secondarys/20.*/IW.*/burst_[0-9][0-9]_(lower|upper)\.slc"
+   echo "    --ion_burst_igram  ion burst ifgrams           18 | 19     ion/20.*_20.*/(lower|upper)/interferograms/IW.*/fine_.*\.int  "
+   echo "    --ion_split_igram  ion split-band ifgrams      19 | 22     ion/20.*_20.*/(lower|upper)/merged/.*\.(int|cor|unw|conncomp) "
+   echo "    --coreg_offset     azimuth and range offsets    9 | 22     coreg_secondarys/20.*/IW.*/.*\.off                            "
+   echo "    --coreg_overlap    overlap slcs and offsets    5,6| 28     coreg_secondarys/20.*/overlap/IW.*/.*\.(slc|off)              "
+   echo "    --esd              ESD files                    7 | 28     ESD/20.*_20.*/IW.*/.*\.(int|bin|cor|off)                      "
+   echo "    --ion_burst_ramp   ion burst-level burst ramp  27 | 28     ion_burst_ramp_dates/20.*/IW.*/burst.*\.(float)               "
+   echo "    ---------------------      --------------------------------------------------------------------------------------------- "
+   echo "      c# : created at           The step at which those files are created                                                    "
+   echo "      k# : kill after           The step after completing which is safe to delete those files without obstructing processing "
+   echo "      *  : --merged_slc         Not used in the topsStack 'interferogram' workflow, can delete merged SLCs if you have them  "
+   echo "      These steps number are counted in the stackSentinel.py 'interferogram' workflow                                        "
+   echo "    -----------------------------      ------------------------------------------------------------------------------------- "
+   echo "    Quick actions:    --all              delete above all files                                                              "
+   echo "                      --dry_run          do not delete files, just print out file list and sizes to log, takes long time!!   "
+   echo "                      --delete           actually delete files, default is dry_run                                           "
+   echo "    ------------------------------------------------------------------------------------------------------------------------ "
    echo
    echo "Recommend usage:"
    echo "  1. Delete the coarse interferograms                                  "
@@ -93,13 +101,8 @@ fi
 run_date=`date`
 echo "##########################################################" | tee -a $logfile
 echo "  Calling clean_topsStack_files.sh at: $run_date"           | tee -a $logfile
-
-if [ "$delete_files_bool" = "true" ];
-then
-    echo ' [Deleting / Dry run] : Actual Deleting Files!'         | tee -a $logfile
-else
-    echo ' [Deleting / Dry run] : Neh, just a Dry Run...'         | tee -a $logfile
-fi
+echo "  Current working directory: $current_dir"                  | tee -a $logfile
+echo "  Arguments: $@"                                            | tee -a $logfile
 
 ################### Regex patterns of paths of files to delete ######################
 ## Note:
@@ -109,15 +112,6 @@ fi
 ## Comment info:
 ##     Target files [created by step | can be delete after step]
 #####################################################################################
-## coregistered secondarys overlap files
-#   created at : run_05_overlap_geo2rdr, run_06_overlap_resample
-#   kill after : run_08_timeseries_misreg
-coreg_overlap_path='\./coreg_secondarys/20.*/overlap/IW.*/.*\.(slc|off)'
-
-## esd files
-#   created at : run_07_pairs_misreg
-#   kill after : run_08_timeseries_misreg
-esd_path='\./ESD/20.*_20.*/IW.*/.*\.(int|bin|cor|off)'
 
 ## geom reference burst files
 #   created at : run_01_unpack_topo_reference
@@ -140,6 +134,12 @@ burst_igram_path='\./interferograms/20.*_20.*/IW.*/fine_.*\.int'
 # we need them to calculate the coherence (via .vrt files in merged/SLC/)
 burst_slc_path='\./coreg_secondarys/20.*/IW.*/burst_[0-9][0-9]\.slc'
 
+## regular ifg merged slcs
+#   created at : run_12_merge_reference_secondary_slc
+#   kill after : any step; Only used in 'SLC' or 'offset' workflow. For 'interferogram' workflow, you can delete merged SLCs anytime you like
+# so no calculation is based on that except you want to do offset tracking / damage proxy map.
+merged_slc_path='\./merged/SLC/20.*/.*\.slc.full'
+
 ## upper and lower burst SLCs
 #   created at : run_17_subband_and_resamp
 #   kill after : run_18_generateIgram_ion
@@ -161,6 +161,22 @@ ion_split_igram_path='\./ion/20.*_20.*/(lower|upper)/merged/.*\.(int|cor|unw|con
 #   kill after : run_22_computeIon
 coreg_offset_path='\./coreg_secondarys/20.*/IW.*/.*\.off'
 
+## coregistered secondarys overlap files
+#   created at : run_05_overlap_geo2rdr, run_06_overlap_resample
+#   kill after : run_08_timeseries_misreg; run_28_mergeBurstRampIon if you need ion burst-ramp correction
+coreg_overlap_path='\./coreg_secondarys/20.*/overlap/IW.*/.*\.(slc|off)'
+
+## esd files
+#   created at : run_07_pairs_misreg
+#   kill after : run_08_timeseries_misreg; run_28_mergeBurstRampIon if you need ion burst-ramp correction
+esd_path='\./ESD/20.*_20.*/IW.*/.*\.(int|bin|cor|off)'
+
+
+## burst-level ion burst ramp estimates
+#   created at : run_27_burstRampIon
+#   kill after : run_28_mergeBurstRampIon
+ion_burst_ramp_path='\./ion_burst_ramp_dates/20.*/IW.*/burst.*\.(float)'
+
 ## TODO:
 #  if the file patterns is wrong, it leads to bad results for total size of deleted files
 #  alternatively, we can end up calling du on the whole directory to get the right size
@@ -170,34 +186,50 @@ coreg_offset_path='\./coreg_secondarys/20.*/IW.*/.*\.off'
 # Parser for command-line options. Idiomatic parameter and option handling in sh:
 #      https://superuser.com/questions/186272/check-if-any-of-the-parameters-to-a-bash-script-match-a-string/186279
 del_paths=()
-echo -n "  Deleting options:" | tee -a $logfile
+echo "  Deleting options:" | tee -a $logfile
 while test $# -gt 0
 do
     case "$1" in
-        --coreg_overlap)   del_paths+=("$coreg_overlap_path");   echo " overlap slcs and offset files"        | tee -a $logfile  ;;
-        --esd)             del_paths+=("$esd_path");             echo " ESD files"                            | tee -a $logfile  ;;
-        --geom_reference)  del_paths+=("$geom_reference_path");  echo " geometry reference burst files"       | tee -a $logfile  ;;
-        --coarse_igram)    del_paths+=("$coarse_path");          echo " coarse interferograms"                | tee -a $logfile  ;;
-        --burst_igram)     del_paths+=("$burst_igram_path");     echo " burst interferograms"                 | tee -a $logfile  ;;
-        --burst_slc)       del_paths+=("$burst_slc_path");       echo " burst slcs"                           | tee -a $logfile  ;;
-        --ion_burst_slc)   del_paths+=("$ion_burst_slc_path");   echo " ionosphere burst slcs"                | tee -a $logfile  ;;
-        --ion_burst_igram) del_paths+=("$ion_burst_igram_path"); echo " ionosphere burst interferograms"      | tee -a $logfile  ;;
-        --ion_split_igram) del_paths+=("$ion_split_igram_path"); echo " ionosphere split-band interferograms" | tee -a $logfile  ;;
-        --coreg_offset)    del_paths+=("$coreg_offset_path");    echo " azimuth and range offset files"       | tee -a $logfile  ;;
-        --all)             del_paths+=("$coreg_overlap_path");
-                           del_paths+=("$esd_path");
-                           del_paths+=("$geom_reference_path");
+        --geom_reference)  del_paths+=("$geom_reference_path");  echo "  + geometry reference burst files"       | tee -a $logfile  ;;
+        --coarse_igram)    del_paths+=("$coarse_path");          echo "  + coarse interferograms"                | tee -a $logfile  ;;
+        --burst_igram)     del_paths+=("$burst_igram_path");     echo "  + burst interferograms"                 | tee -a $logfile  ;;
+        --burst_slc)       del_paths+=("$burst_slc_path");       echo "  + burst slcs"                           | tee -a $logfile  ;;
+        --merged_slc)      del_paths+=("$merged_slc_path");      echo "  + merged slcs"                          | tee -a $logfile  ;;
+        --ion_burst_slc)   del_paths+=("$ion_burst_slc_path");   echo "  + ionosphere burst slcs"                | tee -a $logfile  ;;
+        --ion_burst_igram) del_paths+=("$ion_burst_igram_path"); echo "  + ionosphere burst interferograms"      | tee -a $logfile  ;;
+        --ion_split_igram) del_paths+=("$ion_split_igram_path"); echo "  + ionosphere split-band interferograms" | tee -a $logfile  ;;
+        --coreg_offset)    del_paths+=("$coreg_offset_path");    echo "  + azimuth and range offset files"       | tee -a $logfile  ;;
+        --coreg_overlap)   del_paths+=("$coreg_overlap_path");   echo "  + overlap slcs and offset files"        | tee -a $logfile  ;;
+        --esd)             del_paths+=("$esd_path");             echo "  + ESD files"                            | tee -a $logfile  ;;
+        --ion_burst_ramp)  del_paths+=("$ion_burst_ramp_path");  echo "  + ion burst-level burst ramp estimates" | tee -a $logfile  ;;
+        --all)             del_paths+=("$geom_reference_path");
                            del_paths+=("$coarse_path");
                            del_paths+=("$burst_igram_path");
                            del_paths+=("$burst_slc_path");
+                           del_paths+=("$merged_slc_path");
                            del_paths+=("$ion_burst_slc_path");
                            del_paths+=("$ion_burst_igram_path");
                            del_paths+=("$ion_split_igram_path");
-                           del_paths+=("$coreg_offset_path");    echo " All deletion options activated"       | tee -a $logfile ;;
+                           del_paths+=("$coreg_offset_path");
+                           del_paths+=("$coreg_overlap_path");
+                           del_paths+=("$esd_path");
+                           del_paths+=("$ion_burst_ramp_path");  echo "  + All deletion options activated"       | tee -a $logfile ;;
+
+        --help)            Help; exit 0 ;; # Print help and exit
+        --dry_run)         delete_files_bool="false"; echo " ** You specify : --dry_run" | tee -a $logfile ;;
+        --delete)          delete_files_bool="true";  echo " ** You specify : --delete"  | tee -a $logfile ;;
         *) echo "Argument $1 not understood" ;; # Keep running even if one argument is wrong - TODO might want to terminate the whole run if we make a mistake here
     esac
     shift
 done
+
+echo "----------------------------------------------------------" | tee -a $logfile
+if [ "$delete_files_bool" = "true" ];
+then
+    echo ' [Deleting / Dry run] : Actual Deleting Files!'         | tee -a $logfile
+else
+    echo ' [Deleting / Dry run] : Neh, just a Dry Run...'         | tee -a $logfile
+fi
 echo "##########################################################" | tee -a $logfile
 
 # Alias find command using regular expressions

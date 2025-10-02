@@ -69,10 +69,11 @@ def read_time_unix(infile):
     sub_time = firstline[20:]
 
     # Convert to datetime
+    sub_time = pd.to_numeric(sub_time)  # Ensure it's numeric
     sub_time = pd.to_datetime(sub_time, unit='s')
 
     # Pandas DF saving time and jobID info
-    df = pd.read_table(infile, names=['Step','Job ID','Slurm array','Start','Finish','Elapsed'], delim_whitespace=True, comment='#')
+    df = pd.read_table(infile, names=['Step','Job ID','Slurm array','Start','Finish','Elapsed'], sep=r'\s+', comment='#')
 
     # Convert unix timestamps to datetime objects
     df['Start']     = pd.to_datetime(df['Start'],unit='s')
@@ -146,41 +147,80 @@ def write_simple_runtime(summary_df):
 
 
 def estimate_cost(rsc_file, summary_df):
-    '''
-    Calculate resources used and estimate the HPC cost.
-    ~~~ Caltech Resnick High Performance Computing Center ~~~
-    Rate structure (might be updated): https://www.hpc.caltech.edu/rates
-    '''
-    # Core Hour Calculation: assume the Aggregate Spend is at the bracket of $6,501-$24,000
-    rate = 0.008   # Fee per compute unit (1 CPU core hour = 1 computing unit)
+    """
+    Estimates HPC cost by updating summary_df in-place.
+    Rate based on Caltech Resnick High Performance Computing Center rates (0.008 $/CPU unit).
+    Minimalist error handling: checks for file existence and required columns only.
+    """
+    rate = 0.008  # Fee per compute unit (1 CPU core hour = 1 computing unit)
 
-    res_df = pd.read_table(rsc_file, header=0, delim_whitespace=True)
-    res_df.columns = res_df.columns.str.replace('#', '') # Remove comment character from column names
-    summary_df['CPUs']      = np.nan
-    summary_df['GPUs']      = np.nan
-    summary_df['CPU Units'] = np.nan
-    summary_df['Cost ($)']  = np.nan
+    if not os.path.exists(rsc_file):
+        raise FileNotFoundError(f"Resource file not found: {rsc_file}")
 
-    # Loop through the stages and calculate the cost for each one
-    # need summary_df and res_df to have corresponding rows - both referring to the same step of the procesing
-    for index, row in res_df.iterrows():
-        summary_df.loc[index,'CPUs'] = int(row['Ncpus_per_task'])  # pass num of CPUs to summary_df
-        gpu_idxs = res_df['Gres'].to_numpy().nonzero()[0]          # find the stages use GPUs
-        if index in gpu_idxs:
-            summary_df.loc[index,'GPUs'] = res_df.loc[index,'Gres']
-        else:
-            summary_df.loc[index,'GPUs'] = 0
+    # Read resource file and clean column names
+    res_df = pd.read_table(rsc_file, header=0, sep=r'\s+').rename(columns=lambda x: x.replace('#', ''))
 
-        hours     = summary_df.loc[index,'Array mean'].seconds / 3600
-        num_jobs  = summary_df.loc[index,'Num jobs']
-        cpu_units = (row['Ncpus_per_task'] + summary_df.loc[index,'GPUs']*10) * num_jobs * hours
-        summary_df.loc[index,'CPU Units'] = cpu_units
-        summary_df.loc[index,'Cost ($)']  = cpu_units*rate
+    # Essential column validation (without try-except)
+    # These will raise KeyError if columns are missing
+    _ = res_df['Step'], res_df['Ncpus_per_task']
+    _ = summary_df['Step'], summary_df['Array mean'], summary_df['Num jobs']
 
-    summary_df['CPUs'] = summary_df['CPUs'].astype(int)
-    summary_df['GPUs'] = summary_df['GPUs'].astype(int)
-    total_cost         = summary_df['Cost ($)'].sum()
+    # Preprocess 'Gres' to get numerical GPU count
+    # If 'Gres' column is missing, it will default to 0 GPUs.
+    if 'Gres' in res_df.columns:
+        # CORRECTED LINE: Convert extracted string to numeric (float) first,
+        # then fill NaNs, then convert to int. This avoids the FutureWarning.
+        res_df['Gres_count'] = (
+            res_df['Gres'].astype(str).str.extract(r'gpu:(\d+)', expand=False)
+            .astype(float) # Convert extracted strings to float (allows NaN)
+            .fillna(0)     # Fill NaNs (now float 0.0)
+            .astype(int)   # Convert to integer
+        )
+    else:
+        res_df['Gres_count'] = 0 # If 'Gres' column doesn't exist, assume 0 GPUs
+
+    # Map resource info to summary_df based on 'Step'
+    res_lookup = res_df.set_index('Step')
+    summary_df['Ncpus_per_task_rsc'] = summary_df['Step'].map(res_lookup['Ncpus_per_task'])
+    summary_df['Gres_count_rsc']     = summary_df['Step'].map(res_lookup['Gres_count'])
+
+    # Identify rows that have all necessary data for calculation (from both DFs)
+    # Using .notna() to handle NaNs introduced by .map() for unmatched steps
+    calculable_mask = (
+        summary_df['Ncpus_per_task_rsc'].notna() &
+        summary_df['Array mean'].notna() &
+        summary_df['Num jobs'].notna()
+    )
+
+    # Convert timedelta to hours for calculable rows
+    hours = summary_df.loc[calculable_mask, 'Array mean'].dt.total_seconds() / 3600
+
+    # Calculate CPU Units (10 CPU units per GPU hour) for calculable rows
+    cpu_units = (
+        (summary_df.loc[calculable_mask, 'Ncpus_per_task_rsc'] +
+         summary_df.loc[calculable_mask, 'Gres_count_rsc'] * 10) *
+        summary_df.loc[calculable_mask, 'Num jobs'] *
+        hours
+    )
+
+    # Initialize new columns on summary_df with NaNs
+    summary_df['CPUs']        = np.nan
+    summary_df['GPUs']        = np.nan
+    summary_df['CPU Units']   = np.nan
+    summary_df['Cost ($)']    = np.nan
+
+    # Update summary_df in-place for calculable rows
+    summary_df.loc[calculable_mask, 'CPUs']        = summary_df.loc[calculable_mask, 'Ncpus_per_task_rsc'].astype(int)
+    summary_df.loc[calculable_mask, 'GPUs']        = summary_df.loc[calculable_mask, 'Gres_count_rsc'].astype(int)
+    summary_df.loc[calculable_mask, 'CPU Units']   = cpu_units
+    summary_df.loc[calculable_mask, 'Cost ($)']    = cpu_units * rate
+
+    # Clean up temporary columns created for mapping
+    summary_df.drop(columns=['Ncpus_per_task_rsc', 'Gres_count_rsc'], inplace=True)
+
+    total_cost = summary_df['Cost ($)'].sum(skipna=True)
     return total_cost
+
 
 
 def plot_timings(summary_df, pic_file='cpu_wall_time.pdf'):
@@ -270,7 +310,6 @@ def call_analyse_time(infile, rsc_file, pic_file, time_file):
     '''
     ## 1. Read from time_unix outputs from each job log
     summary_df, sub_time = read_time_unix(infile)
-
     ## 2. More time calculations
     # Calculate the overall wait time for the whole submission
     #  + note that we can have many wait times - every element of the array has to wait
@@ -292,7 +331,6 @@ def call_analyse_time(infile, rsc_file, pic_file, time_file):
 
     ## 3. Estimate the HPC cost
     total_cost = estimate_cost(rsc_file, summary_df)
-
 
     ## 4. Write & Print summaries
 
@@ -330,7 +368,7 @@ def call_analyse_time(infile, rsc_file, pic_file, time_file):
         summary_df.loc[index,'Array mean'] = format_timedeltas(row['Array mean'].seconds,digits=0)
         # Replace NaTs with 0
         if pd.isnull(row['Array std']):
-            summary_df.loc[index,'Array std'] = 0
+            summary_df.loc[index,'Array std'] = pd.Timedelta(0)
         else:
             summary_df.loc[index,'Array std'] = format_timedeltas(row['Array std'].seconds,digits=0)
 

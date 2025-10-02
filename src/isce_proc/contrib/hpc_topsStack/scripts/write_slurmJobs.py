@@ -169,8 +169,8 @@ def write_job_scripts(inps):
         cmd_num = len(open(step_script).readlines())
 
         # enough walltime to compute and document the file size?
-        if timestr2sec(time)[0] >= 1800.0:
-            # if walltime more than 30 min, task no. 2 will check filesize
+        if timestr2sec(time)[0] >= 3600.0:
+            # if walltime more than 60 min, task no. 2 will check filesize
             check_disk = 2
         else:
             # no checking
