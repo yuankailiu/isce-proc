@@ -16,6 +16,29 @@ Each job uses SLURM arrays to manage the processing that can be done in parallel
 
 The `resources.cfg` file gives the resources allocated to each array element, not to the whole job step combined. Different resource files are for different sized jobs - `resources_array_full_eff.cfg` is the efficient ('eff') allocation of resources for the full T115a track (25 to 32N)
 
+## Quick start with `topsstack.py` (branch `workflow-v2`)
+
+One command, driven by the track template (e.g. `ChileSenAT076.txt`, kept in the stack directory).
+Besides the `isce.*` keys for `run_isce_stack.py`, the template can hold `asf.*`, `dem.*`, `select.*`
+and `hpc.*` keys; everything left `auto` is derived (track tag, orbit and direction from the name,
+AOI and DEM box from `isce.boundingBox`). `topsstack.py show <template>` prints the result.
+
+```bash
+topsstack.py search   ChileSenAT076.txt          # ASF search -> ../data/search_results.csv/kml
+topsstack.py download ChileSenAT076.txt --slurm  # zips, 8 parallel Slurm shards (resumable)
+topsstack.py inspect  ChileSenAT076.txt          # s1_version.txt, s1_slice.txt, epochs_latlon.png, extent
+topsstack.py select   ChileSenAT076.txt          # s1_select_ion.py (moves unusable slices to not_used/)
+topsstack.py dem      ChileSenAT076.txt          # DEM + water body over the bbox
+run_isce_stack.py     ChileSenAT076.txt          # configs/ and run_files/
+topsstack.py jobs     ChileSenAT076.txt          # run_files/*.job and helpers
+topsstack.py submit   ChileSenAT076.txt          # afterok chain (-s/-e/-l as before)
+topsstack.py status   ChileSenAT076.txt 13-16    # outputs per row; --rerun --submit for bad rows
+topsstack.py clean    ChileSenAT076.txt          # when each file type can go; add targets + --delete
+```
+
+To use this version instead of `main`, point the environment at the worktree before loading it:
+`export ISCE_PROC_HOME=~/tools/isce-proc-v2` (see `~/tools/conda-envs/isce2/config.rc`).
+
 ## Brief workflow
 ### A. Basic preparation:
 1. Copy the `hpc_topsStack` folder to the track main directory:

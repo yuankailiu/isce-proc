@@ -1,301 +1,192 @@
 #!/usr/bin/env python3
 #^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-# Author: Cunren Liang
-# Co-authors: Ollie Stephenson, Yuan-Kai Liu
-# Last update: May, 2023
+# Author: Cunren Liang,
+#         Yuan-Kai Liu,
+#         Ollie Stephenson
+# Last update: Sept 2025 (YKL)
 #^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-# refer to: https://github.com/isce-framework/isce2/blob/main/contrib/stack/topsStack/plotIonPairs.py
+# refer to:
+# https://github.com/isce-framework/isce2/blob/main/contrib/stack/topsStack/plotIonPairs.py
 
 import argparse
 import glob
 import os
 import sys
-from argparse import RawTextHelpFormatter
-
-import isce
-import isceobj
 import numpy as np
+import tempfile
+import isce, isceobj
+from argparse import RawTextHelpFormatter
 from isceobj.Alos2Proc.Alos2ProcPublic import runCmd
 
 
 def cmdLineParse():
-    '''
-    Command line parser.
-    '''
     EXAMPLE = """
-plot_imgs.py -i 'ion/*_*/ion_cal/filt.ion'                --redo --loc -3 --chan 2 --out pic/img_ion         --amp  --mark pairs_diff_starting_ranges.txt
-plot_imgs.py -i 'ion_dates/*.ion'                         --redo --loc  1 --chan 1 --out pic/img_ion_dates   --wrap 6.28
-plot_imgs.py -i 'ion_azshift_dates/*.ion'                 --redo --loc  1 --chan 1 --out pic/img_azshiftDate --wrap 0.00628
-plot_imgs.py -i 'ion_burst_ramp_merged_dates/*.float'     --redo --loc -1 --chan 1 --out pic/img_ionRampDate --wrap 0.0628
-plot_imgs.py -i 'merged/interferograms/*_*/filt_fine.unw' --redo --loc -2 --chan 2 --out pic/img_unw
+    plot_imgs.py -i 'ion/*_*/ion_cal/filt.ion'                --redo --loc -3 --band 2 --out pic/img_ion         --amp  --txt pairs.txt
+    plot_imgs.py -i 'ion_dates/*.ion'                         --redo --loc  1 --band 1 --out pic/img_ion_dates   --wrap 6.28
+    plot_imgs.py -i 'ion_azshift_dates/*.ion'                 --redo --loc  1 --band 1 --out pic/img_azshiftDate --wrap 0.00628
+    plot_imgs.py -i 'ion_burst_ramp_merged_dates/*.float'     --redo --loc -1 --band 1 --out pic/img_ionRampDate --wrap 0.0628
+    plot_imgs.py -i 'merged/interferograms/*_*/filt_fine.unw' --redo --loc -2 --band 2 --out pic/img_unw
     """
 
-    parser = argparse.ArgumentParser(description='mdx plot a bunch of images (.int, .unw, .ion, .float, etc.).',
-                                     formatter_class=RawTextHelpFormatter,
-                                     epilog=EXAMPLE)
-    parser.add_argument('--in', '-i', dest='input', type=str, required=True,
-            help = 'data path and filename patterns for glob')
-    parser.add_argument('--loc', '-l', dest='loc', type=int, default=-3,
-            help = 'pair/date pattern location in the path. E.g., -3 for ./ion/*_*/ion_cal/filt.ion. (default: %(default)s)')
-    parser.add_argument('--chan', '-b', dest='chan', type=int, default=2,
-            help = 'usually, 1 for amplitude, 2 for phase. (default: %(default)s)')
-    parser.add_argument('--wrap', '-w', dest='wrap', type=float, default=6.28,
-            help = 'Wrap range. (default: %(default)s)')
-    parser.add_argument('--out', '-o', dest='outdir', type=str, default='./img',
-            help = 'output image folder. (default: %(default)s)')
-    parser.add_argument('--redo', '-r', dest='redo', action='store_true', default=False,
-            help = 'Replot all the individual .tif plots. (default: %(default)s)')
-    parser.add_argument('--collate', '-c', dest='collate', action='store_true', default=True,
-            help = 'Collate all .tif to a single .svg. (default: %(default)s)')
-    parser.add_argument('--amp', '-a', dest='overamp', action='store_true', default=False,
-            help = 'turn on overlaying the amplitude. (default: %(default)s)')
-    parser.add_argument('--mark', '-m', dest='mark_txt', type=str, default=None,
-            help = 'Mark certain dates/pairs from a text file (default: %(default)s)')
-
+    parser = argparse.ArgumentParser(
+        description="Batch plot ISCE rasters with mdx, and optionally collage into SVG/HTML.",
+        formatter_class=RawTextHelpFormatter,
+        epilog=EXAMPLE,
+    )
+    parser.add_argument("-i", "--in", dest="input", required=True,
+                        help="Glob pattern for files (.int, .unw, .ion, .float, etc.)")
+    parser.add_argument("-l", "--loc", dest="loc", type=int, default=-3,
+                        help="Index of pair/date substring in path (default: %(default)s)")
+    parser.add_argument("-b", "--band", dest="band", type=int, default=2,
+                        help="Raster band: 1=amplitude, 2=phase (default: %(default)s)")
+    parser.add_argument("-w", "--wrap", dest="wrap", type=float, default=6.28,
+                        help="Wrap range (default: %(default)s)")
+    parser.add_argument("-o", "--out", dest="outdir", default="./img",
+                        help="Output folder (default: %(default)s)")
+    parser.add_argument("-r", "--redo", dest="redo", action="store_true",
+                        help="Replot all .tif images")
+    parser.add_argument("-a", "--amp", dest="overamp", action="store_true",
+                        help="Overlay amplitude (only valid for band=2)")
+    parser.add_argument("-m", "--mask", dest="maskfile", default=None,
+                        help="Optional mask raster (same size, e.g. waterBody.rdr, 0=water,1=land)")
+    parser.add_argument("-t", "--txt", dest="date_txt", default=None,
+                        help="Text file listing dates/pairs to highlight")
+    parser.add_argument("-c", "--collage", dest="collage", action="store_true", default=True,
+                        help="Collage .tifs into SVG/HTML (default: %(default)s)")
     if len(sys.argv) <= 1:
-        print('')
-        parser.print_help()
-        sys.exit(1)
-    else:
-        return parser.parse_args()
+        parser.print_help(); sys.exit(1)
+    return parser.parse_args()
 
 
-if __name__ == '__main__':
-
+if __name__ == "__main__":
     inps = cmdLineParse()
 
-    # output folder
-    odir = inps.outdir
-    if inps.overamp:
-        odir += '_amp'
-    if not os.path.exists(odir):
-        os.makedirs(odir)
+    odir = inps.outdir + ("_amp" if inps.overamp else "")
+    os.makedirs(odir, exist_ok=True)
 
-    # glob the files to be plotted
-    files   = sorted(glob.glob(os.path.join(inps.input)))
+    files = sorted(glob.glob(os.path.join(inps.input)))
+    if not files:
+        print("No files found."); sys.exit(1)
 
-    # read the dates/pairs to mark
+    # load mask once (if any)
+    mask = None
+    if inps.maskfile:
+        print(f"Loading mask: {inps.maskfile}")
+        img = isceobj.createImage(); img.load(files[0] + ".xml")
+        width, length = img.width, img.length
+        mask = np.fromfile(inps.maskfile, dtype=np.int8).reshape(length, width)
+
+    # read highlight dates/pairs
     marks = []
-    if inps.mark_txt:
-        with open(inps.mark_txt) as f:
-            lines = f.readlines()
-            for line in lines:
-                line = line.strip()
-                if len(line)>0 and line[0].isdigit():
-                    marks.append(line)
+    if inps.date_txt:
+        with open(inps.date_txt) as f:
+            marks = [ln.strip() for ln in f if ln.strip() and ln[0].isdigit()]
         marks = list(set(marks))
 
+    # gauge first file for layout
+    img = isceobj.createImage(); img.load(files[0] + ".xml")
+    width, length = img.width, img.length
+    ipl, ppc, WIDTH = 20, 30, 30  # imgs/row, px/cm, artboard width
+    n_rows = np.ceil(len(files) / ipl)
+    ratio = min(1.0, WIDTH * ppc / (ipl * width))  # scaling factor
+    LENGTH = (length * ratio * n_rows) / ppc
+    rW, rL = width * ratio / ppc, length * ratio / ppc
 
-    ##########################################
-    # 0. preparation
-    ##########################################
-    # combine plot dimension
-    ipl    = 20  # images per row
-    ppc    = 30  # pixels per cm (the conversion that I guess)
-    WIDTH  = 30  # artborad width [cm]
-    n_rows = np.ceil(len(files) / ipl)  # number of img rows
-    print(f'Total number of files : {len(files)}')
-    print(f'Collate {ipl} images per line')
-    print(f'Expect {n_rows} rows in the collate plot')
+    print(f"Total files: {len(files)} | {ipl} per row | ~{n_rows:.0f} rows")
+    print(f"Image size: {width}x{length}px | Collage board: {WIDTH}x{LENGTH:.1f}cm")
 
-    # gauge the image dimension by the first file
-    img = isceobj.createImage()
-    img.load(files[0]+'.xml')
-    width  = img.width
-    length = img.length
-    print('Image dimension [px]: WIDTH, LENGTH = ', width, length)
+    svg = f"""<?xml version="1.0" standalone="no"?>
+    <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+    "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+    <svg width="{WIDTH}cm" height="{LENGTH}cm" version="1.1"
+        xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">"""
 
-    widthMax = WIDTH*ppc / ipl
-    if width >= widthMax:
-        ratio = widthMax / width
-        resize = f' -resize {100.0*ratio}%'
-        pz = f' -pz -{1/ratio}'
-    else:
-        ratio = 1.0
-        resize = ''
-        pz = ''
+    tmp_files = []  # temporary masked files to cleanup
 
-    LENGTH = (length * ratio * n_rows) / ppc # artboard length [cm]
-    print(resize)
-    print('Collate image dimension [px]: WIDTH, LENGTH = ', width*ratio, length*ratio)
-    print('Collate artboard dimension [cm]: WIDTH, LENGTH = ', WIDTH, LENGTH)
-
-    # set up combine plot
-    svg =   '''<?xml version="1.0" standalone="no"?>
-            <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
-            "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
-            <svg width="{}cm" height="{}cm" version="1.1"
-                xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
-            '''.format(WIDTH, LENGTH)
-    tlr =   '''
-            </svg>
-            '''
-    rW  = width  * ratio / ppc  # cm width of each panel
-    rL  = length * ratio / ppc  # cm length of each panel
-
-
-    ##########################################
-    # 1. plot each file as tif
-    ##########################################
     for i, file in enumerate(files):
-        pair  = file.split('/')[inps.loc]
-        if '.' in pair:
-            pair = pair.split('.')[0]
-        if '_' in pair:
-            mdate = pair.split('_')[0]
-            sdate = pair.split('_')[1]
-        else:
-            date = str(pair)
+        pair = file.split("/")[inps.loc].split(".")[0]
+        mdate, sdate, date = None, None, None
+        if "_" in pair: mdate, sdate = pair.split("_")
+        else: date = pair
 
-        # generate each .tif plot
+        # replot to tif
         if inps.redo:
-            img = isceobj.createImage()
-            img.load(file+'.xml')
-            width  = img.width
-            length = img.length
+            img = isceobj.createImage(); img.load(file + ".xml")
+            width, length = img.width, img.length
+            file_to_plot = file
 
-            if inps.chan == 1:
-                cmd = 'mdx {} -s {} -ch1 -r4 -wrap {} -addr -{} -cmap CMY -P -workdir {} {}'.format(
-                    file,
-                    width,
-                    inps.wrap,
-                    inps.wrap/2,
-                    odir, pz)
-            elif inps.chan == 2:
+            if mask is not None:
+                data = np.fromfile(file, dtype=np.float32).reshape(length, width)
+                data = (data * mask).astype(np.float32)
+                tmp = tempfile.NamedTemporaryFile(delete=False, dir="/dev/shm", suffix=".ion")
+                data.tofile(tmp.name)
+                file_to_plot = tmp.name
+                tmp_files.append(tmp.name)
+
+            if inps.band == 1:
+                cmd = f"mdx {file_to_plot} -s {width} -ch1 -r4 -wrap {inps.wrap} -addr -{inps.wrap/2} -cmap CMY -P -workdir {odir}"
+            elif inps.band == 2:
                 if not inps.overamp:
-                    cmd = 'mdx {} -s {} -ch2 -r4 -rhdr {} -wrap {} -addr -{} -cmap CMY -P -workdir {} {}'.format(
-                        file,
-                        width,
-                        width*4,
-                        inps.wrap,
-                        inps.wrap/2,
-                        odir, pz)
-                elif inps.overamp:
-                    cmd = 'mdx {} -s {} -amp -r4 -rtlr {} -CW -unw -r4 -rhdr {} -wrap {} -addr -{} -cmap CMY -P -workdir {} {}'.format(
-                        file,
-                        width,
-                        width*4,
-                        width*4,
-                        inps.wrap,
-                        inps.wrap/2,
-                        odir, pz)
-
+                    cmd = f"mdx {file_to_plot} -s {width} -ch2 -r4 -rhdr {width*4} -wrap {inps.wrap} -addr -{inps.wrap/2} -cmap CMY -P -workdir {odir}"
+                else:
+                    cmd = f"mdx {file_to_plot} -s {width} -amp -r4 -rtlr {width*4} -CW -unw -r4 -rhdr {width*4} -wrap {inps.wrap} -addr -{inps.wrap/2} -cmap CMY -P -workdir {odir}"
             runCmd(cmd)
 
-            # Can change the compression here if we want
-            #cmd = 'convert {} {} {}.tif'.format(os.path.join(odir, 'out.ppm'), resize, os.path.join(odir, pair))
-            cmd = 'convert {} {}.tif'.format(os.path.join(odir, 'out.ppm'), os.path.join(odir, pair))
-            runCmd(cmd)
-            os.remove(os.path.join(odir, 'out.ppm'))
+            # resize + compress to keep files small
+            ppm = os.path.join(odir, "out.ppm")
+            tif = os.path.join(odir, f"{pair}.tif")
+            resize = f"-resize {100.0*ratio}%"
+            runCmd(f"convert {ppm} {resize} -compress LZW {tif}")
+            os.remove(ppm)
 
-
-        ##########################################
-        # 2. generate the collate plot as svg
-        ##########################################
-        if inps.collate:
-            #line and column indexes, indexes start from 1
+        # collage SVG entries
+        if inps.collage:
             ii = int((i + 1 - 0.1) / ipl) + 1
             jj = i + 1 - (ii - 1) * ipl
-
-            first_row_gap = rL / 8
-            first_col_gap = rW / 5
-
-            # plot the interferograms
-            if '_' in pair or '-' in pair:
-                if any(x in marks for x in [f'{mdate}_{sdate}', f'{sdate}_{mdate}', f'{mdate}-{sdate}', f'{sdate}-{mdate}']):
-                    print(f' > mark the pair {pair}')
-                    font_color = ';fill:red'
-                    add_box    = '''<rect fill="none" stroke="red" stroke-width="2" x="{}cm" y="{}cm" width="{}cm" height="{}cm"/>
-                                 '''.format(first_col_gap + (jj-1)*rW*0.85,
-                                            first_row_gap + (ii-1)*rL*0.82,
-                                            rW-first_col_gap, rL-first_row_gap)
-                    print(add_box)
-                else:
-                    font_color = ''
-                    add_box    = ''
-
-                # write the svg
-                img =   '''<image xlink:href="{}" x="{}cm" y="{}cm"/>
-                            {}
-                            <text x="{}cm" y="{}cm" style="font-family:'Times New Roman';font-weight:normal;font-style:normal;font-stretch:normal;font-variant:normal;font-size:8px{}">{}</text>
-                            <text x="{}cm" y="{}cm" style="font-family:'Times New Roman';font-weight:normal;font-style:normal;font-stretch:normal;font-variant:normal;font-size:8px{}">{}</text>
-                        '''.format(os.path.join(pair + '.tif'),
-                                   first_col_gap + (jj-1)*rW*0.85,
-                                   first_row_gap + (ii-1)*rL*0.82,
-                                   add_box,
-                                   first_col_gap + (jj-1)*rW*0.85,
-                                   first_row_gap + (ii-1)*rL*0.82+rW*0.1,
-                                   font_color, mdate,
-                                   first_col_gap + (jj-1)*rW*0.85,
-                                   first_row_gap + (ii-1)*rL*0.82+rW*0.1*2.5,
-                                   font_color, sdate)
-
-            # plot the acquisitions
+            x0 = rW * 0.85 * (jj - 1) + rW / 5
+            y0 = rL * 0.82 * (ii - 1) + rL / 8
+            font_color, add_box = "", ""
+            if mdate and sdate:
+                if any(x in marks for x in [f"{mdate}_{sdate}", f"{sdate}_{mdate}", f"{mdate}-{sdate}", f"{sdate}-{mdate}"]):
+                    font_color = ";fill:red"
+                    add_box = f'<rect fill="none" stroke="red" stroke-width="2" x="{x0}cm" y="{y0}cm" width="{rW}cm" height="{rL}cm"/>'
+                img_svg = f'''<image xlink:href="{pair}.tif" x="{x0}cm" y="{y0}cm"/>
+                    {add_box}
+                    <text x="{x0}cm" y="{y0+rW*0.1}cm" style="font-family:Times;font-size:8px{font_color};">
+                    <tspan x="{x0}cm" dy="0">{mdate}_</tspan><tspan x="{x0}cm" dy="1em">{sdate}</tspan></text>'''
             else:
-                if date in marks:
-                    print(f' > mark the date {date}')
-                    font_color = ';fill:red'
-                else:
-                    font_color = ''
+                if date in marks: font_color = ";fill:red"
+                img_svg = f'''<image xlink:href="{pair}.tif" x="{x0}cm" y="{y0}cm"/>
+                    <text x="{x0}cm" y="{y0+rW*0.1}cm" style="font-family:Times;font-size:8px{font_color};">{date}</text>'''
+            svg += img_svg
 
-                # write the svg
-                img =   '''    <image xlink:href="{}" x="{}cm" y="{}cm"/>
-                        <text x="{}cm" y="{}cm" style="font-family:'Times New Roman';font-weight:normal;font-style:normal;font-stretch:normal;font-variant:normal;font-size:8px{}">{}</text>
-                        '''.format(os.path.join(pair + '.tif'),
-                                    first_col_gap + (jj-1)*rW*0.85,
-                                    first_row_gap + (ii-1)*rL*0.82,
-                                    first_col_gap + (jj-1)*rW*0.85,
-                                    first_row_gap + (ii-1)*rL*0.82+rW*0.1,
-                                    font_color,
-                                    date)
+    svg += "</svg>"
+    with open(os.path.join(odir, "collage.svg"), "w") as f: f.write(svg)
 
-            svg += img
+    # cleanup tmp RAM files
+    for t in tmp_files:
+        try: os.remove(t)
+        except: pass
 
-    svg += tlr
+    # colorbar
+    cb_w, cb_l = 100, 20
+    cb = np.ones((cb_l, cb_w), np.float32) * np.linspace(-inps.wrap/2, inps.wrap/2, cb_w, dtype=np.float32)[None,:]
+    cb.astype(np.float32).tofile(os.path.join(odir, "colorbar"))
+    runCmd(f"mdx {os.path.join(odir,'colorbar')} -s {cb_w} -cmap cmy -wrap {inps.wrap} -addr -{inps.wrap/2} -P -workdir {odir}")
+    ppm = os.path.join(odir, "out.ppm")
+    tif = os.path.join(odir, f"colorbar_-{inps.wrap/2}_{inps.wrap/2}.tiff")
+    runCmd(f"convert {ppm} -compress LZW {tif}")
+    runCmd(f"rm {os.path.join(odir,'colorbar')} {ppm}")
 
-    with open(os.path.join(odir, 'collate.svg'), 'w') as f:
-        f.write(svg)
-
-
-    ##########################################
-    # 3. create colorbar
-    ##########################################
-    width_colorbar = 100
-    length_colorbar = 20
-    colorbar = np.ones((length_colorbar, width_colorbar), dtype=np.float32) * \
-               (np.linspace(-inps.wrap/2, inps.wrap/2, num=width_colorbar, endpoint=True, dtype=np.float32))[None,:]
-    colorbar.astype(np.float32).tofile(os.path.join(odir, 'colorbar'))
-    runCmd('mdx {} -s {} -cmap cmy -wrap {} -addr -{} -P -workdir {}'.format(os.path.join(odir, 'colorbar'), width_colorbar, inps.wrap, inps.wrap/2, odir))
-    runCmd('convert {} -compress LZW -resize 100% {}'.format(os.path.join(odir, 'out.ppm'), os.path.join(odir, f'colorbar_-{inps.wrap/2}_{inps.wrap/2}.tiff')))
-    runCmd('rm {} {}'.format(os.path.join(odir, 'colorbar'), os.path.join(odir, 'out.ppm')))
-
-
-    ##########################################
-    # 4. convert SVG → HTML for browser preview
-    ##########################################
-    html_file = os.path.join(odir, "collate.html")
-    svg_file  = os.path.join(odir, "collate.svg")
-
-    # convert all .tif → .png so browsers can show them
+    # HTML
+    html_file = os.path.join(odir, "collage.html")
     runCmd(f"mogrify -format png {odir}/*.tif")
-
-    # copy svg → html
-    runCmd(f"cp {svg_file} {html_file}")
-
-    # prepend header safely
-    header = "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Collated</title></head><body style=\"margin:0;\">\n"
+    runCmd(f"cp {os.path.join(odir,'collage.svg')} {html_file}")
     with open(html_file, "r+") as f:
         content = f.read()
-        f.seek(0, 0)
-        f.write(header + content)
-
-    # append </body></html>
-    with open(html_file, "a") as f:
-        f.write("</body></html>\n")
-
-    # replace .tif → .png inside html
+        f.seek(0)
+        f.write("<!DOCTYPE html><html><head><meta charset='utf-8'><title>Collage</title></head><body style='margin:0;'>\n" + content)
+    with open(html_file, "a") as f: f.write("</body></html>\n")
     runCmd(f"sed -i 's/\\.tif/\\.png/g' {html_file}")
 
-    print(f"HTML file ready for preview: {html_file}")
-
-    print('Normal complete.')
+    print(f"Done. HTML preview: {html_file}")

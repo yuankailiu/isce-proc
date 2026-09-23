@@ -10,11 +10,18 @@ import sys
 from contextlib import contextmanager
 from pathlib import Path
 
-from isce_proc.hpc import config
+from isce_proc.hpc import config, data
 
 SCRIPTS = Path(__file__).resolve().parents[1] / 'contrib' / 'hpc_topsStack' / 'scripts'
 
 EXAMPLE = """examples (from the stack directory, e.g. chile/a076/hpc_topsStack):
+  topsstack.py search   ChileSenAT076.txt                # ASF search -> data/search_results.*
+  topsstack.py download ChileSenAT076.txt --slurm 8      # 8 parallel shards on compute nodes
+  topsstack.py download ChileSenAT076.txt --dry-run      # what is missing
+  topsstack.py download ChileSenAT076.txt --needed --verify   # only zips the stack reads, CRC-checked
+  topsstack.py inspect  ChileSenAT076.txt                # s1_version.txt, epochs_latlon.png, ...
+  topsstack.py select   ChileSenAT076.txt                # s1_select_ion.py (moves bad slices)
+  topsstack.py dem      ChileSenAT076.txt                # DEM + water body
   topsstack.py show   ChileSenAT076.txt                  # resolved settings
   topsstack.py jobs   ChileSenAT076.txt                  # write run_files/*.job (+ helpers)
   topsstack.py submit ChileSenAT076.txt -s 17 -e 20      # submit steps 17-20 as an afterok chain
@@ -75,7 +82,45 @@ def cmd_clean(c, extra):
         return _run_script_main('clean_topsStack', extra)
 
 
+def cmd_search(c, extra):
+    return data.search(c, extra)
+
+
+def cmd_download(c, extra):
+    ap = argparse.ArgumentParser(prog='topsstack.py download TEMPLATE')
+    ap.add_argument('--needed', action='store_true', help='only the zips the stack VRTs read (reference/, secondarys/)')
+    ap.add_argument('--verify', action='store_true', help='also CRC-check complete-size zips; re-download bad ones')
+    ap.add_argument('--dry-run', action='store_true', help='only report what would be downloaded')
+    ap.add_argument('--slurm', type=int, metavar='N', help='submit N Slurm array tasks (default asf.shards)', nargs='?', const=0)
+    ap.add_argument('--shard', type=str, metavar='I/N', help='this process handles every N-th file from I (used by --slurm)')
+    ap.add_argument('-n', '--nproc', type=int, help='parallel downloads (default asf.processes)')
+    a = ap.parse_args(extra)
+    if a.slurm is not None:
+        flags = [f for f, on in (('--needed', a.needed), ('--verify', a.verify)) if on]
+        flags += ['-n', str(a.nproc)] if a.nproc else []
+        return data.download_slurm(c, a.slurm or c.asf.shards, flags)
+    shard = tuple(map(int, a.shard.split('/'))) if a.shard else None
+    return data.download(c, needed=a.needed, shard=shard, verify=a.verify, dry_run=a.dry_run, nproc=a.nproc)
+
+
+def cmd_inspect(c, extra):
+    return data.inspect(c, extra)
+
+
+def cmd_select(c, extra):
+    return data.select(c, extra)
+
+
+def cmd_dem(c, extra):
+    return data.dem(c, extra)
+
+
 COMMANDS = {
+    'search':   (cmd_search,   'ASF search from asf.* -> data/search_results.csv/kml'),
+    'download': (cmd_download, 'download/verify SLC zips (resumable; --slurm N for parallel shards)'),
+    'inspect':  (cmd_inspect,  'SLC versions/starting ranges/slices and latitude extent (s1_version.py, s1_kml_latlon.py)'),
+    'select':   (cmd_select,   'topsStack s1_select_ion.py: move unusable slices to not_used/'),
+    'dem':      (cmd_dem,      'DEM and water body over dem.snwe (download_dem.sh)'),
     'show':   (cmd_show,   'print the settings resolved from the template'),
     'jobs':   (cmd_jobs,   'write Slurm job files into run_files/ (write_slurmJobs.py)'),
     'submit': (cmd_submit, 'submit job files as an afterok chain (submit_chained_dependencies.sh)'),
