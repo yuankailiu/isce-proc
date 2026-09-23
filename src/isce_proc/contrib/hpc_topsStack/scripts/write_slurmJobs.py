@@ -10,6 +10,7 @@
 import argparse
 import os
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 import numpy as np
@@ -91,6 +92,10 @@ def cmdLineParse():
                                'its python pool uses Ncpus_per_task / this many processes')
     parser.add_argument('--clean', dest='clean', action='store_true',
                         help = 'write the deletion lines active instead of commented out')
+    parser.add_argument('--account', dest='account', type=str, default=GROUPNAME,
+                        help = 'Slurm account (default: %(default)s)')
+    parser.add_argument('--mail', dest='mail', type=str, default=f'{mail_user}@caltech.edu',
+                        help = 'mail address for FAIL/END notices (default: %(default)s)')
     return parser
 
 
@@ -188,7 +193,7 @@ def write_job_scripts(inps):
             is_last    = (index == len(step_scripts) - 1) and (i == num_sbatch - 1)
 
             context = {
-                "groupname"         :   GROUPNAME,
+                "groupname"         :   inps.account,
                 "time"              :   time,
                 "nodes"             :   nodes,
                 "ntasks"            :   ntasks,
@@ -199,7 +204,7 @@ def write_job_scripts(inps):
                 "step_num"          :   step_num,
                 "step_script"       :   step_script,
                 "step_index"        :   index+1,
-                "mail_user"         :   mail_user,
+                "mail"              :   inps.mail,
                 "mail_type"         :   'FAIL,END' if is_last else 'FAIL',  # email when the final step finishes
                 "row_id0"           :   row_id0,
                 "task_id1"          :   task_id1,
@@ -219,7 +224,7 @@ def write_job_scripts(inps):
                 outf.write(inps.template.format(**context))
 
     with open('disk_usage.job', 'w') as outf:
-        outf.write(DISK_JOB.format(groupname=GROUPNAME, track=inps.track_no))
+        outf.write(DISK_JOB.format(groupname=inps.account, track=inps.track_no))
     with open('total_file_sizes.txt', 'w') as outf:
         outf.write(f'{"Step":35s}{"Step number":12s}{"Job ID":12s}{"Task ID":12s}{"Total size":12s}\n')
     print(' disk_usage.job')
@@ -252,11 +257,17 @@ def main(iargs=None):
     if Path.cwd().name != 'run_files':
         sys.exit('run from the stack directory or its run_files/')
 
-    # copy the helper scripts and default inputs next to the run_files
+    # copy the helper scripts (always, so they match this version) and the default
+    # resources.cfg (only if missing: it is edited per track) next to the run_files
     inputs = SCRIPT_DIR.parent / 'inputs'
-    for f in [SCRIPT_DIR / h for h in HELPERS] + [inputs / 'resources.cfg']:
-        if not Path(f.name).exists():
-            shutil.copy(f, f.name)
+    for h in HELPERS:
+        shutil.copy(SCRIPT_DIR / h, h)
+    if not Path('resources.cfg').exists():
+        shutil.copy(inputs / 'resources.cfg', 'resources.cfg')
+    rev = subprocess.run(['git', '-C', str(SCRIPT_DIR), 'describe', '--always', '--dirty', '--all', '--long'],
+                         capture_output=True, text=True).stdout.strip() or 'unknown'
+    with open('isce_proc_version.txt', 'w') as f:
+        f.write(f'{SCRIPT_DIR}\n{rev}\n')
 
     # read input resource config and slurm template
     inps.rsc_file = inps.rsc_file or 'resources.cfg'

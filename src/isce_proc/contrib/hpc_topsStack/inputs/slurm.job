@@ -13,7 +13,7 @@
 #SBATCH --mem-per-cpu={mem}                         # memory per CPU core (Need to fix by trial and error)
 #SBATCH -J "{step_index}_{step_name}_{track}"	    # job name
 #SBATCH --output={log_name}                         # Format of output log file (%j = job id)
-#SBATCH --mail-user={mail_user}@caltech.edu         # User email address
+#SBATCH --mail-user={mail}                           # User email address
 #SBATCH --mail-type={mail_type}                     # Email notification when event types occur
 #SBATCH --array=1-{task_id1}%{max_task}             # Throttle job array at a certain number of active tasks
 #SBATCH --partition={partition}                     # which partition to send the job to, 'expansion' or 'gpu'

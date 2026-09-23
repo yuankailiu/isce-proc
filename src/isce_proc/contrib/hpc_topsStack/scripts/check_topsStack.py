@@ -103,9 +103,17 @@ def latest_logs(step):
 
 
 def step_ids(step):
-    """Job IDs of a step from the most recent job_id_logfile_*.txt, in submission order."""
-    logs = sorted(glob.glob('job_id_logfile_*.txt'), key=os.path.getmtime)
-    return re.findall(rf'^{step}\s+(\d+)', open(logs[-1]).read(), re.M) if logs else []
+    """Job IDs of a step from the most recent job_id_logfile_*.txt that lists it, in submission order.
+
+    A log may hold several submissions (appended); the last block listing the step wins.
+    """
+    for log in sorted(glob.glob('job_id_logfile_*.txt'), key=os.path.getmtime, reverse=True):
+        blocks = re.split(r'^IDs of Jobs submitted at:.*$', open(log).read(), flags=re.M)
+        for b in reversed(blocks):
+            ids = re.findall(rf'^{step}\s+(\d+)', b, re.M)
+            if ids:
+                return ids
+    return []
 
 
 def parse_steps(args, runs):
