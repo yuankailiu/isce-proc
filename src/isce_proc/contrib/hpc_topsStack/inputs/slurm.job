@@ -56,9 +56,11 @@ printf "########################################################################
 cmd=$(sed "${{ROWINDEX}}q;d" {step_script})
 # Run command
 echo "Running: ${{cmd}}" | tee -a $logfile
-srun $cmd 2>&1 || scancel $SLURM_JOB_ID # If srun returns an error, we cancel the job
-# This stops the chained jobs from carrying on
-# TODO this isn't the best way of reporting errors - we don't get the actual error status reported
+srun $cmd 2>&1
+rc=$?
+# The task exits with the command's status (end of script), so Slurm marks it FAILED
+# and the afterok chain stops. The former `|| scancel $SLURM_JOB_ID` exited 0 whenever
+# scancel itself failed (e.g. controller unreachable), marking a failed task COMPLETED.
 # 2>&1 redirects stderr to stdout,
 # Not writing main output to a central logfile to avoid overlapping output - every array element gets its own file
 
@@ -71,6 +73,7 @@ Elapsed="$(($step_time / 3600))hrs $((($step_time / 60) % 60))min $(($step_time 
 printf "####    Step end time: `date` \\n" | tee -a $logfile
 printf "####    SLURM_ARRAY_TASK_ID: $SLURM_ARRAY_TASK_ID \\n" | tee -a $logfile
 printf "####    Total elapsed: $Elapsed \\n" | tee -a $logfile
+printf "####    Exit status: $rc \\n" | tee -a $logfile
 
 ## Log timings
 # Timings file is created by submit_chained_dependencies.sh (headers are written there)
@@ -79,3 +82,4 @@ fmt="%-35s%-12s%-12s%-12s%-12s%-12s\\n"
 printf "$fmt" "{step_name}" "$SLURM_ARRAY_JOB_ID" "$SLURM_ARRAY_TASK_ID" "$start_time" "$finish_time" "$Elapsed" >> timings.txt
 # Log timings in Unix format
 printf "$fmt" "{step_name}" "$SLURM_ARRAY_JOB_ID" "$SLURM_ARRAY_TASK_ID" "$step_start" "$step_end" "$step_time" >> time_unix.txt
+exit $rc
