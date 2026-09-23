@@ -1,14 +1,23 @@
 # Python script to write sbatch files for tops stack on Caltech's HPC
 # Author: Yuan-Kai Liu, Oliver Stephenson, April 2023
-
-# This script is executed under run_files/
+#
+# Run from the stack directory (holding run_files/) or from run_files/, after stackSentinel.py:
+#     python <isce-proc>/contrib/hpc_topsStack/scripts/write_slurmJobs.py -t a076
+# It copies the helper scripts into run_files/, writes one sbatch file per run_file
+# (split into .pN parts above the array limit), a disk-usage job, and run_atTheEnd.sh.
+# Then submit with:  cd run_files; bash submit_chained_dependencies.sh
 
 import argparse
 import os
+import shutil
 import sys
 from pathlib import Path
 import numpy as np
 import pandas as pd
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPT_DIR))
+import clean_topsStack
 
 # Caltech Resnick HPC PTA group name
 GROUPNAME = 'simonsgroup'
@@ -30,15 +39,33 @@ CPUS_PER_NODE_LIM = 56
 # check with: scontrol show config | grep -E 'MaxArraySize|MaxJobCount'
 SLURM_MAX_ARRAY_SIZE = 1000
 
-# limit the num of tasks in a job array run at once to avoid I/O traffic
-max_task = 32 # This will be overwritten by the `batch` column defined in your resource.cfg table
-              # depends on the ability of your HPC file system...
-              # 32 is a very conservative number
-              # i like 200 though sometimes it got stuck, especially when competing with others on the same node
+# The number of tasks in a job array run at once is the `batch` column of resources.cfg
+# (limits I/O traffic; 200 is fine on Resnick, 32 is very conservative)
 
 ######################## --------------------  ########################
 ########################  YOUR HPC CAPABILITY  ########################
 ######################## --------------------  ########################
+
+# copied into run_files/ so the stack is self-contained
+HELPERS = ['submit_chained_dependencies.sh', 'clean_topsStack.py', 'analyse_time_resource.py']
+
+DISK_JOB = """#!/bin/bash
+# Record the stack size after a step. Submitted by submit_chained_dependencies.sh with
+#   --dependency=afterany:<step job>,singleton --export=ALL,STEP=<run_file>
+# so no step waits for it, and only one of these runs at a time.
+#SBATCH -A {groupname}
+#SBATCH -J disk_usage_{track}
+#SBATCH --time=4:00:00
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=2G
+#SBATCH --partition=expansion
+#SBATCH --output=slurm-disk_usage-%j.out
+
+du -h --max-depth=1 ..
+total=$(du -sh .. | cut -f1)
+printf "%-35s%-12s%-12s%-12s%-12s\\n" "${{STEP#run_??_}}" "${{STEP:0:6}}" "$SLURM_JOB_ID" "-" "$total" >> total_file_sizes.txt
+"""
 
 
 def cmdLineParse():
@@ -48,25 +75,23 @@ def cmdLineParse():
     description = 'Generates SLURM job scripts for each stage of topsStack for Caltech HPC'
 
     EXAMPLE = f"""Examples:
-        ## {__file__} TRACK_NO
+        {Path(__file__).name} -t a076
+        {Path(__file__).name} -t a076 --clean      # activate the file deletion lines
     """
-    epilog = EXAMPLE
-    parser = argparse.ArgumentParser(description=description, formatter_class=argparse.RawTextHelpFormatter,  epilog=epilog)
+    parser = argparse.ArgumentParser(description=description, formatter_class=argparse.RawTextHelpFormatter, epilog=EXAMPLE)
 
     parser.add_argument('-t', '--track', dest='track_no', type=str, required=True,
-                        help = 'Track number, for naming the job (e.g. T115a)')
-    parser.add_argument('-r', '--rsc', dest='rsc_file', type=str, default='resources.cfg',
-                        help = 'resources configuration table for all topsStack stages')
-    parser.add_argument('-j', '--job', dest='job_template', type=str, default='../inputs/slurm.job',
-                        help = 'slurm script template')
-
-    if len(sys.argv) <= 1:
-        print('')
-        parser.print_help()
-        sys.exit(1)
-    else:
-        print('')
-        return parser
+                        help = 'Track name, for naming the jobs (e.g. a076)')
+    parser.add_argument('-r', '--rsc', dest='rsc_file', type=str, default=None,
+                        help = 'resources configuration table (default: run_files/resources.cfg, else ../inputs/resources.cfg)')
+    parser.add_argument('-j', '--job', dest='job_template', type=str, default=None,
+                        help = 'slurm script template (default: inputs/slurm.job next to this script)')
+    parser.add_argument('--omp-topo', dest='omp_topo', type=int, default=4,
+                        help = 'OMP_NUM_THREADS for unpack_topo_reference (default: %(default)s); '
+                               'its python pool uses Ncpus_per_task / this many processes')
+    parser.add_argument('--clean', dest='clean', action='store_true',
+                        help = 'write the deletion lines active instead of commented out')
+    return parser
 
 
 #########################################################################################
@@ -95,42 +120,23 @@ def check_resources(rscDf):
     return True
 
 
-def timestr2sec(time_str):
-    # SBATCH --time supported time format:
-    #       "minutes", "minutes:seconds", "hours:minutes:seconds",
-    #       "days-hours", "days-hours:minutes" and "days-hours:minutes:seconds"
+def deletion_lines(clean):
+    """Map each clean_topsStack target to the step after its kill-after step.
 
-    d, h, m ,s = 0, 0, 0, 0
-
-    if len(time_str.split(':')) == 3:
-        if len(time_str.split(':')[0].split('-')) == 2:
-            fmt = '%d-%H:%M:%S'
-            time_str = time_str.replace('-',':')
-            d, h, m, s = time_str.split(':')
-        else:
-            fmt = '%H:%M:%S'
-            h, m, s = time_str.split(':')
-
-    elif len(time_str.split(':')) == 2:
-        if len(time_str.split(':')[0].split('-')) == 2:
-            fmt = '%d-%H:%M'
-            time_str = time_str.replace('-',':')
-            d, h, m = time_str.split(':')
-        else:
-            fmt = '%M:%S'
-            m, s = time_str.split(':')
-
-    elif len(time_str.split('-')) == 2:
-        fmt = '%d-%H'
-        time_str = time_str.replace('-',':')
-        d, h = time_str.split(':')
-
-    else:
-        fmt = '%M'
-        m = time_str
-
-    dt = 86400*float(d) + 3600*float(h) + 60*float(m) + float(s)
-    return dt, fmt
+    The deletion runs in array task 1 of that next step, i.e. only after every task
+    of the kill-after step has exited OK (afterok chain). Slurm COMPLETED does not
+    prove the outputs exist, so the lines are commented out unless --clean.
+    """
+    steps, zip_vrt, virtual, ion = clean_topsStack.stack_info(str(Path.cwd().parent))
+    nums = sorted(steps.values())
+    attach = {}
+    for target, (_, kill, _) in clean_topsStack.rules(zip_vrt, virtual, ion).items():
+        if kill in steps and steps[kill] < nums[-1]:
+            nxt = next(n for n in nums if n > steps[kill])
+            attach.setdefault(nxt, []).append(target)
+    prefix = '' if clean else '# '
+    return {n: f'{prefix}if [[ $SLURM_ARRAY_TASK_ID -eq 1 ]]; then srun python clean_topsStack.py {" ".join(t)} --delete; fi'
+            for n, t in attach.items()}
 
 
 def write_job_scripts(inps):
@@ -141,24 +147,25 @@ def write_job_scripts(inps):
         pass
 
     # Read/write stackSentienl run_files:
-    runfiles = sorted([x for x in Path.cwd().glob('run_*') if not '.' in str(x)])
+    runfiles = sorted([x for x in Path.cwd().glob('run_*') if not '.' in x.name])
     step_scripts = []
     for run in runfiles:
         step_scripts.append(run.stem)
+    deletions = deletion_lines(inps.clean)
 
     # Iterate over the run files, write an sbatch file for each one
     for index, step_script in enumerate(step_scripts):
         # a table of steps
         step_num        = step_script[:6]
         step_name       = step_script[7:]
-        time            = inps.rscDf[inps.rscDf['Step']==step_name]['Time'].item()
-        nodes           = inps.rscDf[inps.rscDf['Step']==step_name]['Nodes'].item()
-        ntasks          = inps.rscDf[inps.rscDf['Step']==step_name]['Ntasks'].item()
-        ncpus_per_task  = inps.rscDf[inps.rscDf['Step']==step_name]['Ncpus_per_task'].item()
-        mem             = inps.rscDf[inps.rscDf['Step']==step_name]['Mem_per_cpu'].item()
-        gres            = inps.rscDf[inps.rscDf['Step']==step_name]['Gres'].item()
-        batch           = inps.rscDf[inps.rscDf['Step']==step_name]['batch'].item()
-        max_task = batch
+        row             = inps.rscDf[inps.rscDf['Step']==step_name]
+        time            = row['Time'].item()
+        nodes           = row['Nodes'].item()
+        ntasks          = row['Ntasks'].item()
+        ncpus_per_task  = row['Ncpus_per_task'].item()
+        mem             = row['Mem_per_cpu'].item()
+        gres            = row['Gres'].item()
+        max_task        = row['batch'].item()
 
         # assign to a HPC partition w/ or w/o gpus
         # The default partition for The Resnick HPCC will change from “any” (CentOS 7) to “expansion” (RHEL 9) on Tuesday, March 26th.
@@ -167,14 +174,6 @@ def write_job_scripts(inps):
 
         # Get the number of commands in the script
         cmd_num = len(open(step_script).readlines())
-
-        # enough walltime to compute and document the file size?
-        if timestr2sec(time)[0] >= 3600.0:
-            # if walltime more than 60 min, task no. 2 will check filesize
-            check_disk = 2
-        else:
-            # no checking
-            check_disk = 0
 
         # split large sbatch file into multiple parts if needed
         num_sbatch = np.ceil(cmd_num / SLURM_MAX_ARRAY_SIZE).astype(int)
@@ -186,6 +185,7 @@ def write_job_scripts(inps):
             suffix     = '' if num_sbatch == 1 else f'.p{i+1}'
             log_name   = f'slurm-{step_script}-%A_%a{suffix}.out'
             slurm_name = f'{step_script}{suffix}.job'
+            is_last    = (index == len(step_scripts) - 1) and (i == num_sbatch - 1)
 
             context = {
                 "groupname"         :   GROUPNAME,
@@ -200,14 +200,17 @@ def write_job_scripts(inps):
                 "step_script"       :   step_script,
                 "step_index"        :   index+1,
                 "mail_user"         :   mail_user,
+                "mail_type"         :   'FAIL,END' if is_last else 'FAIL',  # email when the final step finishes
                 "row_id0"           :   row_id0,
                 "task_id1"          :   task_id1,
                 "max_task"          :   max_task,
                 "gres"              :   gres,
                 "partition"         :   partition,
                 "mem"               :   mem,
-                "check_disk_list"   :   check_disk,
-                # "ntasks_per_node" :   row['Ntasks_per_node'],
+                # topo runs a python pool of Ncpus_per_task/omp_topo processes, each with omp_topo threads
+                "omp_threads"       :   inps.omp_topo if step_name == 'unpack_topo_reference' else '$SLURM_CPUS_PER_TASK',
+                # delete only from the first part of a multi-part step
+                "deletion"          :   deletions.get(int(step_num[4:]), '') if i == 0 else '',
             }
 
             # Put variables from context dic into the slurm script template
@@ -215,6 +218,13 @@ def write_job_scripts(inps):
             with open(slurm_name, 'w') as outf:
                 outf.write(inps.template.format(**context))
 
+    with open('disk_usage.job', 'w') as outf:
+        outf.write(DISK_JOB.format(groupname=GROUPNAME, track=inps.track_no))
+    with open('total_file_sizes.txt', 'w') as outf:
+        outf.write(f'{"Step":35s}{"Step number":12s}{"Job ID":12s}{"Task ID":12s}{"Total size":12s}\n')
+    print(' disk_usage.job')
+    for n, line in sorted(deletions.items()):
+        print(f'   deletion in run_{n:02d}: {line}')
     print(f'create job scripts for {inps.track_no}.')
 
 
@@ -234,11 +244,24 @@ def write_end_cmd(cmd_script='run_atTheEnd.sh', log_dir='log_files'):
 #################################################################
 def main(iargs=None):
     # parser
-    parser = cmdLineParse()
-    inps = parser.parse_args(args=iargs)
+    inps = cmdLineParse().parse_args(args=iargs)
+
+    # work inside run_files/
+    if Path('run_files').is_dir():
+        os.chdir('run_files')
+    if Path.cwd().name != 'run_files':
+        sys.exit('run from the stack directory or its run_files/')
+
+    # copy the helper scripts and default inputs next to the run_files
+    inputs = SCRIPT_DIR.parent / 'inputs'
+    for f in [SCRIPT_DIR / h for h in HELPERS] + [inputs / 'resources.cfg']:
+        if not Path(f.name).exists():
+            shutil.copy(f, f.name)
 
     # read input resource config and slurm template
-    inps.rscDf = pd.read_table(inps.rsc_file, header=0, delim_whitespace=True)
+    inps.rsc_file = inps.rsc_file or 'resources.cfg'
+    inps.job_template = inps.job_template or str(inputs / 'slurm.job')   # must match this script's fields
+    inps.rscDf = pd.read_table(inps.rsc_file, header=0, sep=r'\s+')
     inps.template = open(inps.job_template, 'r').read()
 
     # write *.job scripts
@@ -248,8 +271,7 @@ def main(iargs=None):
     write_end_cmd()
 
     # done
-    run_dir = Path().absolute().name
-    print(f'Now, get into {run_dir}/ and run `submit_chained_dependencies.sh` for jobs submission!')
+    print('Now run `bash submit_chained_dependencies.sh` here for jobs submission!')
 
 
 #################################################################

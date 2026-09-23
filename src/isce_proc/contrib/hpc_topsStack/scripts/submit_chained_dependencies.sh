@@ -172,6 +172,17 @@ now_unix=$(date "+%s")
 printf "# Job submitted at: %s\n" "$now_unix" >> time_unix.txt
 printf "$fmt" "# Stage" "Job ID" "Array ID" "Start (s)" "Finish (s)" "Elapsed (s)" >> time_unix.txt # Create a file to write all timings to, which is then written to by each stage
 
+## Record the stack size after each step, outside the chain (nothing depends on it)
+# afterany: runs when the step ends; singleton: one disk_usage job at a time
+disk_after() { # $1: index of the job just submitted, $2: its job ID
+    local this next
+    this=$(basename "${sbatch_files[$1]}" | cut -d. -f1)
+    next=$(basename "${sbatch_files[$1+1]:-none}" | cut -d. -f1)
+    if [ -f disk_usage.job ] && [ "$this" != "$next" ]; then
+        sbatch --parsable --dependency=afterany:"$2",singleton --export=ALL,STEP="$this" disk_usage.job > /dev/null
+    fi
+}
+
 ### SUBMIT JOBS
 # Submit the first job
 sbatch_file_to_submit=${sbatch_files[0]} # This is now the relative path
@@ -188,7 +199,7 @@ echo "IDs of Jobs submitted at: $now" >> "${id_logfile}"
 fmt_id="%-35s%-12s\\n"
 printf "$fmt_id" "Stage" "Job ID" >> "${id_logfile}"
 printf "$fmt_id" "${run_file}" "$ID" >> "${id_logfile}"
-# echo $ID >> $id_logfile
+disk_after 0 "$ID"
 
 # Loop over remaining scripts and submit them
 last_job_id="$ID" # Initialize with the first job's ID
@@ -199,6 +210,7 @@ for ((i=1;i<${num_file};i++)); do
     ID=$(sbatch --parsable --dependency=afterok:"${last_job_id}" --export=ALL,logfile="${logfile}" "${sbatch_file_to_submit}")
     printf "$fmt_id" "${run_file}" "$ID" >> "${id_logfile}"
     echo "Submitted $((i+1))/${num_file} ${sbatch_file_to_submit} - $ID"
+    disk_after $i "$ID"
     last_job_id="$ID" # Update the dependency ID for the next iteration
 done
 

@@ -77,8 +77,12 @@ The `resources.cfg` file gives the resources allocated to each array element, no
     # Then run it
     bash stackSenBatch.sh
     ```
-    Outputs:
+    Outputs (all written by `scripts/write_slurmJobs.py`, which `stackSenBatch.sh` calls):
         - `run_files/*.job` for each run_file
+        - `run_files/disk_usage.job`, submitted after each step outside the dependency chain
+        - helper scripts copied into `run_files/`, incl. `clean_topsStack.py`; the deletion
+          lines in the *.job files are commented out unless you pass `--clean`
+        - run `python run_files/clean_topsStack.py` to see when each file type can be deleted
 
 3.  Submit all the jobs. Now can close your terminal and wait for completing email.
     ```bash

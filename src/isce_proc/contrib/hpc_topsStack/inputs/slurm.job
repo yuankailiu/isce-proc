@@ -14,7 +14,7 @@
 #SBATCH -J "{step_index}_{step_name}_{track}"	    # job name
 #SBATCH --output={log_name}                         # Format of output log file (%j = job id)
 #SBATCH --mail-user={mail_user}@caltech.edu         # User email address
-#SBATCH --mail-type=FAIL                            # Email notification when event types occur
+#SBATCH --mail-type={mail_type}                     # Email notification when event types occur
 #SBATCH --array=1-{task_id1}%{max_task}             # Throttle job array at a certain number of active tasks
 #SBATCH --partition={partition}                     # which partition to send the job to, 'expansion' or 'gpu'
 
@@ -30,10 +30,10 @@ ROWINDEX=$((SLURM_ARRAY_TASK_ID+{row_id0}))
 # LOAD MODULES, INSERT CODE, AND RUN YOUR PROGRAMS HERE
 #module load cuda/11.3   # the latest working module on hpc is cuda/11.3
 #module load gcc/7.3.0  # don't use any new gcc, simply use CentOS default gcc on hpc
-export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+export OMP_NUM_THREADS={omp_threads}
 
-### Any deletion statements get added here by 'stack_sentinel_cmd.sh'
-#_deletion_here
+### File deletion (written by write_slurmJobs.py; commented out unless --clean)
+{deletion}
 
 # Store dates/times in different formats
 start_time=`date '+%T'`
@@ -50,30 +50,6 @@ printf "####     SLURM_ARRAY_JOB_ID:  $SLURM_ARRAY_JOB_ID \\n"    | tee -a $logf
 printf "####     SLURM_ARRAY_TASK_ID: $SLURM_ARRAY_TASK_ID \\n"   | tee -a $logfile
 printf "####     Host node:           $(hostname) \\n"            | tee -a $logfile
 printf "##########################################################################################\\n" | tee -a $logfile
-
-######### Calculate file sizes
-# Just run du for some tasks, to avoid massive slowdown when running hundreds of jobs with 10s of TB of data
-# Need to be careful for jobs with small walltimes - the jobs that are running du can take much longer
-# Can probably just run this for a single job, don't need to do it for multiple array elements
-CHECK_DISK_LIST="{check_disk_list}"
-for task_id in $CHECK_DISK_LIST
-do
-    if [[ $SLURM_ARRAY_TASK_ID -eq $task_id ]]; then
-        # Calculate how much data we have at this stage
-        printf "####################\\n"
-        printf "####### File sizes\\n"
-        srun du -ch --max-depth=1 ../ # we're executing from 'run_files', use srun for better logging
-        printf "####################\\n"
-
-        # Just output total size of files at this stage to a separate log
-        total_size=$(eval du -ch --max-depth=1 ../ | tail -1 | cut -f 1)
-        fmt_fs="%-35s%-12s%-12s%-12s%-12s\\n"
-        printf "$fmt_fs" "{step_name}"  "{step_num}" "$SLURM_ARRAY_JOB_ID" "$SLURM_ARRAY_TASK_ID" "$total_size" >> total_file_sizes.txt
-    else
-        echo "Not cacluating file sizes for SLURM_ARRAY_TASK_ID: $SLURM_ARRAY_TASK_ID"
-    fi
-done
-
 
 ########## Execute topsStack commands
 # Read a line from the command file, using the array task ID as index
