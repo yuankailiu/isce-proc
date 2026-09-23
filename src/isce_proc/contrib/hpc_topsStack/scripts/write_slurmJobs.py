@@ -47,7 +47,7 @@ SLURM_MAX_ARRAY_SIZE = 1000
 ######################## --------------------  ########################
 
 # copied into run_files/ so the stack is self-contained
-HELPERS = ['submit_chained_dependencies.sh', 'clean_topsStack.py', 'analyse_time_resource.py']
+HELPERS = ['submit_chained_dependencies.sh', 'clean_topsStack.py', 'check_topsStack.py', 'analyse_time_resource.py']
 
 DISK_JOB = """#!/bin/bash
 # Record the stack size after a step. Submitted by submit_chained_dependencies.sh with

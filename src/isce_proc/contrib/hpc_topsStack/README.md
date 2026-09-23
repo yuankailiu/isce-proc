@@ -89,7 +89,15 @@ The `resources.cfg` file gives the resources allocated to each array element, no
     bash ./run_files/submit_chained_dependencies.sh
     ```
 
-4.  If you need to re-run and reset the processing:
+4.  Check each step from its outputs, not from Slurm states (a task can end COMPLETED
+    without writing anything), and rerun only the rows that failed:
+    ```bash
+    python run_files/check_topsStack.py 13-16            # report: rows, bad, cleaned
+    python run_files/check_topsStack.py 15 --rerun       # print sbatch for the bad rows
+    python run_files/check_topsStack.py 15 --rerun --submit   # submit, re-link next step
+    ```
+
+5.  If you need to re-run and reset the processing:
     If you want to try different parameters in stack processing, or adding new data, sometimes you want to re-process the whole stack from scratch. I think stackSentinle.py will prevent you from simply re-run the stuff without cleaning up the whole folder. So you have to rename or move the current products folder in order to re-run the code.
     ```bash
     # ------ Copy and paste the following the command to reset the process direction ----
