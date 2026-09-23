@@ -12,10 +12,12 @@ Run from the stack directory (the one holding run_files/) or from run_files/.
   clean_topsStack.py                        # show the resolved table for this stack
   clean_topsStack.py coarse_igram burst_igram       # dry run: count files and sizes
   clean_topsStack.py coarse_igram burst_igram --delete
+  clean_topsStack.py coarse_igram burst_igram --delete --reuse   # use the dry-run list, no new search
 Delete a target only after its kill-after step has finished for every row, and after
 you have checked that step's outputs; Slurm COMPLETED alone is not proof.
 """
-import argparse, glob, os, re, sys
+import argparse, fnmatch, glob, os, re, stat, sys
+from pathlib import PurePosixPath
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
@@ -80,22 +82,81 @@ def rules(zip_vrt, virtual, ion):
 
 
 def find(root, patterns, nproc):
-    """Glob in parallel over the entries of each pattern's first wildcard directory."""
-    regular = lambda fs: [f for f in fs if os.path.isfile(f) and not os.path.islink(f)]
-    def one(p):
-        head, _, tail = p.partition('/*/')
-        if not tail:
-            return regular(glob.glob(os.path.join(root, p)))
-        dirs = glob.glob(os.path.join(root, head, '*'))
+    """{path: size} of regular files matching the patterns.
+
+    Each matching directory is listed once (os.scandir) for all file-name patterns
+    that share it, and the size comes from the same directory entry: one stat per file.
+    """
+    names = {}                                   # directory glob -> file-name patterns
+    for p in patterns:
+        d, n = os.path.split(p)
+        names.setdefault(d, []).append(n)
+
+    def dirs(dglob):                             # expand the directory glob, parallel below its first wildcard
+        parts = dglob.split('/')
+        i = next((i for i, c in enumerate(parts) if any(ch in c for ch in '*?[')), None)
+        if i is None:
+            return [os.path.join(root, dglob)]
+        top = os.path.join(root, *parts[:i])
+        tops = [e.path for e in os.scandir(top) if e.is_dir() and fnmatch.fnmatchcase(e.name, parts[i])] \
+               if os.path.isdir(top) else []
+        if i == len(parts) - 1:
+            return tops
         with ThreadPoolExecutor(nproc) as ex:
-            return [f for fs in ex.map(lambda d: regular(glob.glob(os.path.join(d, tail))), dirs) for f in fs]
-    return sorted({f for p in patterns for f in one(p)})
+            return [d for ds in ex.map(lambda t: glob.glob(os.path.join(t, *parts[i + 1:])), tops) for d in ds]
+
+    def scan(d, pats):
+        try:
+            with os.scandir(d) as it:
+                return [(e.path, e.stat(follow_symlinks=False).st_size) for e in it
+                        if any(fnmatch.fnmatchcase(e.name, n) for n in pats) and e.is_file(follow_symlinks=False)]
+        except (FileNotFoundError, NotADirectoryError):
+            return []
+
+    out = {}
+    with ThreadPoolExecutor(nproc) as ex:
+        for dglob, pats in names.items():
+            for fs in ex.map(lambda d: scan(d, pats), dirs(dglob)):
+                out.update(fs)
+    return out
+
+
+def from_log(logs, target, root, patterns, nproc):
+    """{path: size} from the latest dry-run list of `target` in the logs, re-checked against its patterns."""
+    files, cur = None, False
+    for log in logs:                             # oldest first; the last matching block wins
+        for line in open(log):
+            if line.startswith('## '):
+                w = line.split()
+                cur = w[3] == target and 'delete=False' in w
+                if cur:
+                    files = []
+            elif cur:
+                files.append(line.rstrip('\n'))
+    if files is None:
+        return None
+    parts = [PurePosixPath(p).parts for p in patterns]
+    def match(f):
+        rel = PurePosixPath(os.path.relpath(f, root))
+        return any(len(rel.parts) == len(q) and rel.match(str(PurePosixPath(*q))) for q in parts)
+    def size(f):
+        try:
+            st = os.lstat(f)
+            return st.st_size if stat.S_ISREG(st.st_mode) else None
+        except FileNotFoundError:
+            return None
+    files = [f for f in files if match(f)]
+    with ThreadPoolExecutor(nproc) as ex:
+        return {f: s for f, s in zip(files, ex.map(size, files)) if s is not None}
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('targets', nargs='*', help='targets to delete (see table), or "all"')
     ap.add_argument('--delete', action='store_true', help='actually delete (default: dry run)')
+    ap.add_argument('--reuse', action='store_true',
+                    help='with --delete: delete the file list of the latest dry run of each target '
+                         '(re-checked against its patterns; no new search)')
     ap.add_argument('-n', '--nproc', type=int, default=32, help='parallel threads (default: %(default)s)')
     args = ap.parse_args()
 
@@ -120,6 +181,7 @@ def main():
     if bad:
         sys.exit(f'unknown target(s): {bad}')
     log = os.path.join(root, 'run_files', f'clean_topsStack_{datetime.now():%Y-%m-%d}.log')
+    logs = sorted(glob.glob(os.path.join(root, 'run_files', 'clean_topsStack_*.log')))
     total = 0
     print(f'\n{"DELETING" if args.delete else "dry run"}; file lists -> {log}')
     with open(log, 'a') as fl, ThreadPoolExecutor(args.nproc) as ex:
@@ -127,14 +189,20 @@ def main():
             pats, k, _ = table[t]
             if k is None:
                 print(f'  {t:16s} skipped: needed for the lifetime of this stack'); continue
-            files = find(root, pats, args.nproc)
-            size = sum(ex.map(os.path.getsize, files))
+            files = from_log(logs, t, root, pats, args.nproc) if args.reuse else None
+            if args.reuse and files is None:
+                print(f'  {t:16s} no dry-run list in {os.path.basename(log)} etc.; searching')
+            reused = files is not None
+            if not reused:
+                files = find(root, pats, args.nproc)
+            size = sum(files.values())
             fl.write(f'## {datetime.now():%F %T} {t} delete={args.delete} after={kill(k)} '
-                     f'files={len(files)} bytes={size}\n' + ''.join(f + '\n' for f in files))
+                     f'files={len(files)} bytes={size}\n' + ''.join(f + '\n' for f in sorted(files)))
+            fl.flush()
             if args.delete:
                 list(ex.map(os.remove, files))
             total += size
-            print(f'  {t:16s} {len(files):9d} files  {size/1e12:8.3f} TB')
+            print(f'  {t:16s} {len(files):9d} files  {size/1e12:8.3f} TB' + ('  (from dry-run list)' if reused else ''))
     print(f'  {"total":16s} {"":15s}  {total/1e12:8.3f} TB {"deleted" if args.delete else "would be deleted"}')
 
 
