@@ -190,7 +190,7 @@ disk_after() { # $1: index of the job just submitted, $2: its job ID
 # step waits (afterok) for the gate.
 id_logfile="job_id_logfile_${date}.txt"
 echo "IDs of Jobs submitted at: $now" >> "${id_logfile}"
-fmt_id="%-35s%-12s\\n"
+fmt_id="%-50s %s\\n"   # at least one space: long step names ran into the ID
 printf "$fmt_id" "Stage" "Job ID" >> "${id_logfile}"
 gate=false; [ -f gate.job ] && gate=true && echo "gate.job present: checking outputs between steps"
 

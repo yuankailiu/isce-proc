@@ -34,7 +34,7 @@ def _job_ids(run_files):
     """(step, jobid) in submission order from all job_id_logfile_*.txt."""
     out = []
     for f in sorted(glob.glob(os.path.join(run_files, 'job_id_logfile_*.txt')), key=os.path.getmtime):
-        out += re.findall(r'^(run_\d+_\w+)\s+(\d+)', open(f).read(), re.M)
+        out += re.findall(r'^(run_\d+_\w+?)\s*(\d{6,})\s*$', open(f).read(), re.M)   # older logs: no space
     return out
 
 

@@ -127,7 +127,7 @@ def step_ids(step):
     for log in sorted(glob.glob('job_id_logfile_*.txt'), key=os.path.getmtime, reverse=True):
         blocks = re.split(r'^IDs of Jobs submitted at:.*$', open(log).read(), flags=re.M)
         for b in reversed(blocks):
-            ids = re.findall(rf'^{step}\s+(\d+)', b, re.M)
+            ids = re.findall(rf'^{re.escape(step)}\s*(\d+)\s*$', b, re.M)   # older logs: no space
             if ids:
                 return ids
     return []
