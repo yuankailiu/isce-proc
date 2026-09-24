@@ -93,6 +93,10 @@ edit it there). `batch` is the number of array tasks running at once.
 
 ## Notes
 
+- `submit` calls `sbatch` two or three times per step (step, gate, disk usage); on a busy controller
+  that can take ~30 s per call, so run it in the background (`nohup topsstack.py submit ... &`).
+- GPU steps request `--gres=gpu:<hpc.gpuType>:<n>` (Slurm here rejects a count without a type);
+  with `isce.useGPU = no` no GPU is requested at all.
 - `run_01_unpack_topo_reference` runs a Python pool of `Ncpus_per_task / hpc.ompTopo` processes
   (one per burst is fastest), each with `hpc.ompTopo` OpenMP threads, on one node (≤ 56 CPUs here).
 - Using this version: `export ISCE_PROC_HOME=~/tools/isce-proc-v2` before loading the environment
