@@ -73,9 +73,12 @@ def _wanted(c, needed):
     """Granule names to have in the data dir: all search results, or only those the stack's VRTs read."""
     if needed:
         names = set()
-        for v in glob.glob(os.path.join(c.stack, 'reference', 'IW*', 'burst_*.slc.vrt')) + \
-                 glob.glob(os.path.join(c.stack, 'secondarys', '*', 'IW*', 'burst_*.slc.vrt')):
-            names |= set(re.findall(r'/([^/]+)\.zip/', open(v).read()))
+        for v in glob.glob(os.path.join(c.stack, 'reference', 'IW*', 'burst_[0-9][0-9].slc.vrt')) + \
+                 glob.glob(os.path.join(c.stack, 'secondarys', '*', 'IW*', 'burst_[0-9][0-9].slc.vrt')):
+            try:                                   # only unpacked bursts; skip files vanishing meanwhile
+                names |= set(re.findall(r'/([^/]+)\.zip/', open(v).read()))
+            except FileNotFoundError:
+                pass
         if not names:
             sys.exit('--needed: no VRTs reading SLC zips found under reference/ or secondarys/')
         return sorted(names)
