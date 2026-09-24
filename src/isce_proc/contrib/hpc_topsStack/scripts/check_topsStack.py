@@ -65,10 +65,12 @@ def check_file(p):
     s = open(p + '.xml').read()
     g = lambda k: re.search(rf'<property name="{k}">\s*<value>([^<]+)', s)
     try:
-        exp = int(g('width').group(1)) * int(g('length').group(1)) * int(g('number_bands').group(1)) \
-              * DTYPE[g('data_type').group(1).strip().upper()]
+        w, l = int(g('width').group(1)), int(g('length').group(1))
+        exp = w * l * int(g('number_bands').group(1)) * DTYPE[g('data_type').group(1).strip().upper()]
     except (AttributeError, KeyError):
-        return ''                                     # xml without image size: existence only
+        return '' if os.path.getsize(p) > 0 else 'empty'   # xml without image size: existence only
+    if exp == 0:
+        return f'empty image ({w} x {l} in .xml)'         # e.g. a filter that produced no lines
     return '' if os.path.getsize(p) == exp else f'size {os.path.getsize(p)} != {exp}'
 
 
