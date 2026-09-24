@@ -159,7 +159,9 @@ def download(c, needed=False, shard=None, verify=False, dry_run=False, nproc=Non
         print(f'NOT FOUND {m}')
     if dry_run or not todo:
         return 0
-    session = _session()
+    import socket
+    socket.setdefaulttimeout(300)       # asf download calls have no read timeout: a stalled transfer
+    session = _session()                # would hang the thread for good (seen 2026-09-23, 19 h)
 
     def get(it):
         name, size, url = it
