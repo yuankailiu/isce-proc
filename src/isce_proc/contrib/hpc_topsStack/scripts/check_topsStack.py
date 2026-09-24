@@ -46,8 +46,10 @@ def outputs(cmd):
                     # without multilooking only <outfile>.full is written, as a VRT if use_virtual_files
                     full = kv[key] + '.full'
                     out.append((full + '.vrt', 'file') if kv.get('use_virtual_files') == 'True' else (full, 'file'))
+                elif func == 'generateIgram':
+                    out.append((kv[key], 'igram_dir', (kv.get('reference'), kv.get('secondary'))))
                 else:
-                    out.append((kv[key], 'igram_dir' if func == 'generateIgram' else 'file'))
+                    out.append((kv[key], 'file'))
             if func == 'unwrap' and kv.get('method', 'snaphu') == 'snaphu' and kv.get('unw'):
                 out.append((kv['unw'] + '.conncomp', 'file'))
         return out
@@ -74,15 +76,24 @@ def check_file(p):
     return '' if os.path.getsize(p) == exp else f'size {os.path.getsize(p)} != {exp}'
 
 
+def bursts(d):
+    """{(swath, burst number)} of a reference/ or coreg_secondarys/<date>/ dir, from the burst .xml files."""
+    return {(os.path.basename(os.path.dirname(x)), os.path.basename(x)[6:8])
+            for x in glob.glob(os.path.join(d, 'IW*', 'burst_[0-9][0-9].slc.xml'))} if d else set()
+
+
 def check_row(cmd):
     bad = []
-    for path, kind in outputs(cmd):
+    for path, kind, *meta in outputs(cmd):
         if kind == 'igram_dir':
+            # every burst present in both the reference and the secondary must have its interferogram
+            expected = bursts(meta[0][0]) & bursts(meta[0][1]) if meta else set()
             ints = glob.glob(os.path.join(path, 'IW*', 'fine_*.int')) + glob.glob(os.path.join(path, 'IW*', 'fine_*.int.xml'))
-            files = sorted({f[:-4] if f.endswith('.xml') else f for f in ints})
+            files = {f[:-4] if f.endswith('.xml') else f for f in ints}
+            files |= {os.path.join(path, sw, f'fine_{b}.int') for sw, b in expected}
             if not files:
                 bad.append(f'{path}: no burst interferograms')
-            bad += [f'{f}: {r}' for f in files for r in [check_file(f)] if r]
+            bad += [f'{f}: {r}' for f in sorted(files) for r in [check_file(f)] if r]
         else:
             r = check_file(path)
             if r:
