@@ -14,7 +14,7 @@ Run from the stack directory or its run_files/:
   check_topsStack.py 15 --rerun            # also print the sbatch commands for bad rows
   check_topsStack.py 15 --rerun --submit   # submit them, and make the next queued
                                            # step wait for them (job_id_logfile_*.txt)
-  check_topsStack.py 15 --gate 2           # (gate.job) rerun up to 2x, wait, exit 1 if still bad
+  check_topsStack.py 15 --gate 2           # (gate.job) rerun up to 2x via follow-up gates, exit 1 if still bad
 """
 import argparse, glob, os, re, subprocess, sys
 from concurrent.futures import ThreadPoolExecutor
@@ -219,23 +219,41 @@ def relink_next(runs, n, step, new_ids):
               f'    could not re-link {nxt} ({nxt_ids[0]}): {r.stderr.strip()}')
 
 
-def gate(step, args, retries, poll=60):
-    """Check a finished step; rerun bad rows up to `retries` times, waiting for each rerun.
-    Exit 0 when every row is good, else 1 (the next step, afterok on this gate, then never starts)."""
-    import time
-    for attempt in range(retries + 1):
-        _, bad, _ = evaluate(step, args, strict=True)
-        if not bad:
-            print(f'gate {step}: all rows good')
-            return 0
-        if attempt == retries:
-            break
-        print(f'gate {step}: rerun {attempt + 1}/{retries} of {len(bad)} rows')
-        ids = submit_reruns(step, bad, submit=True)
-        while active(ids):
-            time.sleep(poll)
-    print(f'gate {step}: {len(bad)} rows still bad after {retries} reruns; stopping the chain')
-    return 1
+def gate(step, args, retries):
+    """Gate job between two steps (gate.job, afterany on all parts of `step`). Exits in minutes:
+    - all rows good                      -> exit 0 (the next step, afterok on this gate, starts)
+    - bad rows, attempt < retries        -> submit the reruns and a follow-up gate (afterany on
+      them), move the next step from afterok:<this gate> to afterok:<follow-up gate>, exit 0
+    - bad rows, no retries left          -> exit 1 (the next step never starts; FAIL mail)
+    Short gates start quickly (backfill); waiting for reruns is left to Slurm dependencies."""
+    attempt = int(os.environ.get('GATE_ATTEMPT', '0'))
+    _, bad, _ = evaluate(step, args, strict=True)
+    if not bad:
+        print(f'gate {step}: all rows good')
+        return 0
+    if attempt >= retries:
+        print(f'gate {step}: {len(bad)} rows still bad after {retries} reruns; stopping the chain')
+        return 1
+    me = os.environ.get('SLURM_JOB_ID')
+    print(f'gate {step}: rerun {attempt + 1}/{retries} of {len(bad)} rows')
+    ids = submit_reruns(step, bad, submit=True)
+    nxt = subprocess.run(['sbatch', '--parsable', f'--dependency=afterany:{":".join(ids)}',
+                          f'--export=ALL,STEP={step},GATE_ATTEMPT={attempt + 1}', 'gate.job'],
+                         capture_output=True, text=True, check=True).stdout.strip()
+    with open(sorted(glob.glob('job_id_logfile_*.txt'), key=os.path.getmtime)[-1], 'a') as f:
+        f.write(f'{"gate_" + step:50s} {nxt}\n')
+    moved = []
+    if me:                                             # jobs waiting afterok on this gate
+        q = subprocess.run(['squeue', '-h', '-u', os.environ.get('USER', ''), '-o', '%i %E'],
+                           capture_output=True, text=True).stdout.splitlines()
+        for line in q:
+            jid, _, dep = line.partition(' ')
+            if f'afterok:{me}' in dep:
+                subprocess.run(['scontrol', 'update', f'jobid={jid.split("_")[0]}', f'dependency=afterok:{nxt}'],
+                               capture_output=True, text=True)
+                moved.append(jid.split('_')[0])
+    print(f'gate {step}: follow-up gate {nxt} waits for {ids}; moved {sorted(set(moved))} to afterok:{nxt}')
+    return 0
 
 
 def main():
@@ -243,8 +261,8 @@ def main():
     ap.add_argument('steps', nargs='*', help='step numbers or ranges, e.g. 13 15-16 (default: all)')
     ap.add_argument('--rerun', action='store_true', help='print sbatch commands for the bad rows')
     ap.add_argument('--submit', action='store_true', help='with --rerun: submit them and re-link the next step')
-    ap.add_argument('--gate', type=int, metavar='N', help='gate mode (in gate.job): rerun bad rows up to N times, '
-                    'wait for them, exit non-zero if rows are still bad')
+    ap.add_argument('--gate', type=int, metavar='N', help='gate mode (in gate.job): rerun bad rows up to N times '
+                    '(each via a follow-up gate job), exit non-zero if rows are still bad')
     ap.add_argument('--cleaned-ok', action='store_true', help='count "cleaned" outputs as OK (default: reported)')
     ap.add_argument('-n', '--nproc', type=int, default=32)
     ap.add_argument('-v', '--verbose', action='store_true', help='list every bad row')

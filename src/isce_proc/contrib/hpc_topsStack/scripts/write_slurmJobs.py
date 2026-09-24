@@ -71,12 +71,13 @@ printf "%-35s%-12s%-12s%-12s%-12s\\n" "${{STEP#run_??_}}" "${{STEP:0:6}}" "$SLUR
 GATE_JOB = """#!/bin/bash
 # Gate between two steps, submitted by submit_chained_dependencies.sh with
 #   --dependency=afterany:<all parts of the step> --export=ALL,STEP=<run_file>
-# Checks the step's outputs row by row (check_topsStack.py), reruns bad rows up to {retries}
-# times, and exits non-zero if rows are still bad: the next step (afterok on this job) then
-# does not start and you get a FAIL mail.
+# Checks the step's outputs row by row (check_topsStack.py). Bad rows: submits the reruns and a
+# follow-up gate (up to {retries} times) and moves the next step onto that gate; still bad after
+# that: exits non-zero, the next step (afterok) never starts, and you get a FAIL mail.
+# Short time limit on purpose: small jobs start quickly through backfill.
 #SBATCH -A {groupname}
 #SBATCH -J gate_{track}
-#SBATCH --time=2-00:00:00
+#SBATCH --time=00:30:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=4G
