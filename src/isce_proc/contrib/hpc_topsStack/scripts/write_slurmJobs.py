@@ -13,7 +13,6 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-import numpy as np
 import pandas as pd
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -150,6 +149,18 @@ def check_resources(rscDf):
     return True
 
 
+def row_parts(rows):
+    """[(first row index, number of rows)] per job part: a new part where the program changes, and
+    at most SLURM_MAX_ARRAY_SIZE rows each."""
+    progs = [r.split()[0] if r.split() else '' for r in rows]
+    parts, start = [], 0
+    for k in range(1, len(rows) + 1):
+        if k == len(rows) or progs[k] != progs[start] or k - start == SLURM_MAX_ARRAY_SIZE:
+            parts.append((start, k - start))
+            start = k
+    return parts
+
+
 def deletion_lines(clean):
     """Map each clean_topsStack target to the step after its kill-after step.
 
@@ -202,16 +213,13 @@ def write_job_scripts(inps):
         if int(gres) > 0: partition = 'gpu'
         else: partition = 'expansion'
 
-        # Get the number of commands in the script
-        cmd_num = len(open(step_script).readlines())
-
-        # split large sbatch file into multiple parts if needed
-        num_sbatch = np.ceil(cmd_num / SLURM_MAX_ARRAY_SIZE).astype(int)
-        for i in range(num_sbatch):
+        # split the rows into parts: at program changes (e.g. run_22: computeIon.py rows, then the
+        # mergeSwathIon.py rows that need them; parts run one after another) and at the array limit
+        parts = row_parts(open(step_script).read().splitlines())
+        num_sbatch = len(parts)
+        for i, (row_id0, task_id1) in enumerate(parts):
             # use ROWINDEX, instead of SLURM_ARRAY_TASK_ID, to select line of interest
             # link: https://stackoverflow.com/questions/67908698/submitting-slurm-array-job-with-a-limit-above-maxarraysize
-            task_id1   = min(SLURM_MAX_ARRAY_SIZE, cmd_num - i * SLURM_MAX_ARRAY_SIZE)  # ending task index of the current job
-            row_id0    = i * SLURM_MAX_ARRAY_SIZE                                       # starting row index of the current job
             suffix     = '' if num_sbatch == 1 else f'.p{i+1}'
             log_name   = f'slurm-{step_script}-%A_%a{suffix}.out'
             slurm_name = f'{step_script}{suffix}.job'

@@ -66,11 +66,28 @@ def ion_config(c):
     for cfg in ramp:
         n['ramp'] += set_keys(cfg, {'maskfile': c.ion.burstRampMask})
     msg = (f"filtIon: {n['filt']}/{len(filt)} configs changed ({n['align']} with swath_align); "
-           f"burstRampIon: {n['ramp']}/{len(ramp)} changed; keys {keys}")
+           f"burstRampIon: {n['ramp']}/{len(ramp)} changed; keys {keys}; {merge_swath_last(c)}")
     with _log(c, 'stack') as log:
         log.write(f'## ion-config: {msg}\n')
     print(msg)
     return 0
+
+
+def merge_swath_last(c):
+    """Put the mergeSwathIon.py rows of run_NN_computeIon after all computeIon.py rows (stable).
+    Each merge needs the sub-swath results of its pair; `topsstack.py jobs` then gives them their
+    own job part, which runs after the computeIon part."""
+    runs = glob.glob(os.path.join(c.stack, 'run_files', 'run_[0-9][0-9]_computeIon'))
+    if not runs:
+        return 'no computeIon run file'
+    rows = [l for l in open(runs[0]).read().splitlines() if l.strip()]
+    merge = [l for l in rows if l.split()[0] == 'mergeSwathIon.py']
+    new = [l for l in rows if l.split()[0] != 'mergeSwathIon.py'] + merge
+    if new != rows:
+        with open(runs[0], 'w') as f:
+            f.write(''.join(l + '\n' for l in new))
+    return (f'{os.path.basename(runs[0])}: {len(merge)} mergeSwathIon rows '
+            f'{"moved to the end" if new != rows else "already last"} (re-run `topsstack.py jobs`)')
 
 
 # ---------------------------------------------------------------- pair selection

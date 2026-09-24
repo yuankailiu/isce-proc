@@ -88,12 +88,28 @@ def check_row(cmd):
     return bad
 
 
+def part_offsets(step):
+    """{part suffix ('' or 'pN'): (row offset, number of tasks)} from the step's .job files
+    (parts may be uneven: write_slurmJobs.py also splits at program changes)."""
+    out = {}
+    for job in glob.glob(f'{step}.job') + glob.glob(f'{step}.p*.job'):
+        m = re.fullmatch(rf'{re.escape(step)}(?:\.(p\d+))?\.job', job)
+        s = open(job).read()
+        off = re.search(r'ROWINDEX=\$\(\(SLURM_ARRAY_TASK_ID\+(\d+)\)\)', s)
+        arr = re.search(r'#SBATCH --array=1-(\d+)', s)
+        if m and off and arr:
+            out[m.group(1) or ''] = (int(off.group(1)), int(arr.group(1)))
+    return out
+
+
 def latest_logs(step):
     """row -> (log file, 'ok' / 'error' / 'unfinished') from the most recent log of each row."""
     best = {}
+    offsets = part_offsets(step)
     for f in glob.glob(f'slurm-{step}-*_*.out'):
-        m = re.search(r'_(\d+)(?:\.p(\d+))?\.out$', f)
-        row = int(m.group(1)) + MAX_ARRAY * (int(m.group(2) or 1) - 1)
+        m = re.search(r'_(\d+)(?:\.(p\d+))?\.out$', f)
+        off = offsets.get(m.group(2) or '', (MAX_ARRAY * (int((m.group(2) or 'p1')[1:]) - 1), 0))[0]
+        row = int(m.group(1)) + off
         if row not in best or os.path.getmtime(f) > os.path.getmtime(best[row]):
             best[row] = f
     res = {}
@@ -154,13 +170,16 @@ def evaluate(step, args, strict=False):
 
 def submit_reruns(step, bad, submit):
     """sbatch the bad rows, per .pN job file; return new job IDs (none if not submitting)."""
+    offsets = part_offsets(step) or {'': (0, MAX_ARRAY)}
     parts = {}
     for r in sorted(bad):
-        parts.setdefault((r - 1) // MAX_ARRAY + 1, []).append((r - 1) % MAX_ARRAY + 1)
-    multi = os.path.exists(f'{step}.p1.job')
+        for sfx, (off, n) in offsets.items():
+            if off < r <= off + n:
+                parts.setdefault(sfx, []).append(r - off)
+                break
     new_ids = []
-    for p, tasks in parts.items():
-        job = f'{step}.p{p}.job' if multi else f'{step}.job'
+    for sfx, tasks in sorted(parts.items()):
+        job = f'{step}.{sfx}.job' if sfx else f'{step}.job'
         cmd = ['sbatch', '--parsable', f'--array={",".join(map(str, tasks))}', job]
         print('    ' + ' '.join(cmd))
         if submit:
