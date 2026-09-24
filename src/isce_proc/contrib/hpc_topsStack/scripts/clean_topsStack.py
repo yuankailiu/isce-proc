@@ -13,11 +13,12 @@ Run from the stack directory (the one holding run_files/) or from run_files/.
   clean_topsStack.py coarse_igram burst_igram       # dry run: count files and sizes
   clean_topsStack.py coarse_igram burst_igram --delete
   clean_topsStack.py coarse_igram burst_igram --delete --reuse   # use the dry-run list, no new search
-Delete a target only after its kill-after step has finished for every row, and after
-you have checked that step's outputs; Slurm COMPLETED alone is not proof.
+With --delete, each target is deleted only if its kill-after step has all its outputs
+(checked row by row with check_topsStack.py; Slurm COMPLETED alone is not proof).
 """
 import argparse, fnmatch, glob, os, re, stat, sys
 from pathlib import PurePosixPath
+from types import SimpleNamespace
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
@@ -150,6 +151,22 @@ def from_log(logs, target, root, patterns, nproc):
         return {f: s for f, s in zip(files, ex.map(size, files)) if s is not None}
 
 
+def unfinished(root, steps, kill, nproc):
+    """'' if the kill-after step has all its outputs (check_topsStack.py), else a reason."""
+    if kill not in steps:
+        return f'{kill} not in run_files'
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import check_topsStack as chk
+    run = f'run_{steps[kill]:02d}_{kill}'
+    old = os.getcwd()
+    os.chdir(os.path.join(root, 'run_files'))
+    try:
+        _, bad, _ = chk.evaluate(run, SimpleNamespace(nproc=nproc, cleaned_ok=False, verbose=False))
+    finally:
+        os.chdir(old)
+    return f'{len(bad)} rows of {run} lack their outputs' if bad else ''
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('targets', nargs='*', help='targets to delete (see table), or "all"')
@@ -157,6 +174,8 @@ def main():
     ap.add_argument('--reuse', action='store_true',
                     help='with --delete: delete the file list of the latest dry run of each target '
                          '(re-checked against its patterns; no new search)')
+    ap.add_argument('--no-check', action='store_true',
+                    help='with --delete: skip checking that the kill-after step produced all its outputs')
     ap.add_argument('-n', '--nproc', type=int, default=32, help='parallel threads (default: %(default)s)')
     args = ap.parse_args()
 
@@ -189,6 +208,10 @@ def main():
             pats, k, _ = table[t]
             if k is None:
                 print(f'  {t:16s} skipped: needed for the lifetime of this stack'); continue
+            if args.delete and not args.no_check:
+                reason = unfinished(root, steps, k, args.nproc)
+                if reason:
+                    print(f'  {t:16s} NOT deleted: {reason} (use --no-check to override)'); continue
             files = from_log(logs, t, root, pats, args.nproc) if args.reuse else None
             if args.reuse and files is None:
                 print(f'  {t:16s} no dry-run list in {os.path.basename(log)} etc.; searching')

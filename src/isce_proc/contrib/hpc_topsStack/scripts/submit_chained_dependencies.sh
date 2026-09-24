@@ -184,34 +184,49 @@ disk_after() { # $1: index of the job just submitted, $2: its job ID
 }
 
 ### SUBMIT JOBS
-# Submit the first job
-sbatch_file_to_submit=${sbatch_files[0]} # This is now the relative path
-run_file=$(basename "${sbatch_file_to_submit}" | cut -d. -f1)
-
-# Pass the logfile as an argument
-# Need 'ALL' so we get other environment variables
-# Add -q debug to use debug queue (will hit job threshold when using slurm arrays)
-ID=$(sbatch --parsable --export=ALL,logfile="${logfile}" "${sbatch_file_to_submit}")
-echo "Submitted 1/${num_file} ${sbatch_file_to_submit} - $ID"
-# Write a logfile with the ID of each stage
+# Without gate.job: every job waits (afterok) for the previous one.
+# With gate.job (topsstack.py jobs, hpc.gate = yes): parts of a step chain with afterany, a gate job
+# runs after all parts of each step (afterany), checks outputs and reruns bad rows, and the next
+# step waits (afterok) for the gate.
 id_logfile="job_id_logfile_${date}.txt"
 echo "IDs of Jobs submitted at: $now" >> "${id_logfile}"
 fmt_id="%-35s%-12s\\n"
 printf "$fmt_id" "Stage" "Job ID" >> "${id_logfile}"
-printf "$fmt_id" "${run_file}" "$ID" >> "${id_logfile}"
-disk_after 0 "$ID"
+gate=false; [ -f gate.job ] && gate=true && echo "gate.job present: checking outputs between steps"
 
-# Loop over remaining scripts and submit them
-last_job_id="$ID" # Initialize with the first job's ID
-for ((i=1;i<${num_file};i++)); do
+dep=""            # dependency of the first part of the next step
+step_parts=""     # job IDs of the current step's parts
+last_job_id=""
+for ((i=0;i<${num_file};i++)); do
     sbatch_file_to_submit=${sbatch_files[i]}
     run_file=$(basename "${sbatch_file_to_submit}" | cut -d. -f1)
-
-    ID=$(sbatch --parsable --dependency=afterok:"${last_job_id}" --export=ALL,logfile="${logfile}" "${sbatch_file_to_submit}")
+    prev=""
+    if [ "$i" -gt 0 ]; then prev=$(basename "${sbatch_files[i-1]}" | cut -d. -f1); fi
+    if [ "$i" -gt 0 ] && [ "$run_file" = "$prev" ]; then       # next part of the same step
+        if $gate; then d="--dependency=afterany:${last_job_id}"; else d="--dependency=afterok:${last_job_id}"; fi
+    elif [ -n "$dep" ]; then
+        d="--dependency=${dep}"
+    else
+        d=""
+    fi
+    ID=$(sbatch --parsable $d --export=ALL,logfile="${logfile}" "${sbatch_file_to_submit}")
     printf "$fmt_id" "${run_file}" "$ID" >> "${id_logfile}"
     echo "Submitted $((i+1))/${num_file} ${sbatch_file_to_submit} - $ID"
     disk_after $i "$ID"
-    last_job_id="$ID" # Update the dependency ID for the next iteration
+    last_job_id="$ID"
+    step_parts="${step_parts:+${step_parts}:}${ID}"
+    next=$(basename "${sbatch_files[i+1]:-none}" | cut -d. -f1)
+    if [ "$run_file" != "$next" ]; then                        # last part of this step
+        if $gate && [ "$next" != "none" ]; then
+            G=$(sbatch --parsable --dependency=afterany:${step_parts} --export=ALL,STEP="${run_file}" gate.job)
+            printf "$fmt_id" "gate_${run_file}" "$G" >> "${id_logfile}"
+            echo "  gate after ${run_file} - $G"
+            dep="afterok:${G}"
+        else
+            dep="afterok:${ID}"
+        fi
+        step_parts=""
+    fi
 done
 
 # Note - if one job fails, all the rest will stay in the queue. Can kill all of your jobs by doing scancel -u <username>

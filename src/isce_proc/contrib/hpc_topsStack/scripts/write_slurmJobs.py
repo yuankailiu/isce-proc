@@ -69,6 +69,27 @@ printf "%-35s%-12s%-12s%-12s%-12s\\n" "${{STEP#run_??_}}" "${{STEP:0:6}}" "$SLUR
 """
 
 
+GATE_JOB = """#!/bin/bash
+# Gate between two steps, submitted by submit_chained_dependencies.sh with
+#   --dependency=afterany:<all parts of the step> --export=ALL,STEP=<run_file>
+# Checks the step's outputs row by row (check_topsStack.py), reruns bad rows up to {retries}
+# times, and exits non-zero if rows are still bad: the next step (afterok on this job) then
+# does not start and you get a FAIL mail.
+#SBATCH -A {groupname}
+#SBATCH -J gate_{track}
+#SBATCH --time=2-00:00:00
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=2
+#SBATCH --mem=4G
+#SBATCH --partition=expansion
+#SBATCH --mail-user={mail}
+#SBATCH --mail-type=FAIL
+#SBATCH --output=slurm-gate-%j.out
+
+{python} check_topsStack.py "$(echo "$STEP" | cut -d_ -f2)" --gate {retries} -n 2
+"""
+
+
 def cmdLineParse():
     '''
     Command line parsers
@@ -92,6 +113,8 @@ def cmdLineParse():
                                'its python pool uses Ncpus_per_task / this many processes')
     parser.add_argument('--clean', dest='clean', action='store_true',
                         help = 'write the deletion lines active instead of commented out')
+    parser.add_argument('--gate', dest='gate', type=int, default=None, metavar='N',
+                        help = 'write gate.job: between steps, check outputs and rerun bad rows up to N times')
     parser.add_argument('--template', dest='template', type=str, default=None,
                         help = 'track template; run_atTheEnd.sh then calls `topsstack.py report` with it')
     parser.add_argument('--account', dest='account', type=str, default=GROUPNAME,
@@ -227,6 +250,13 @@ def write_job_scripts(inps):
 
     with open('disk_usage.job', 'w') as outf:
         outf.write(DISK_JOB.format(groupname=inps.account, track=inps.track_no))
+    if inps.gate is not None:
+        with open('gate.job', 'w') as outf:
+            outf.write(GATE_JOB.format(groupname=inps.account, track=inps.track_no, mail=inps.mail,
+                                       retries=inps.gate, python=sys.executable))
+        print(f' gate.job (reruns per step: {inps.gate})')
+    elif os.path.exists('gate.job'):
+        os.remove('gate.job')                            # gate off: plain afterok chain
     with open('total_file_sizes.txt', 'w') as outf:
         outf.write(f'{"Step":35s}{"Step number":12s}{"Job ID":12s}{"Task ID":12s}{"Total size":12s}\n')
     print(' disk_usage.job')

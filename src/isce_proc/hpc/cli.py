@@ -68,6 +68,7 @@ def cmd_jobs(c, extra):
     argv = ['-t', c.hpc.track, '--omp-topo', str(c.hpc.ompTopo), '--account', c.hpc.account, '--mail', c.hpc.mail,
             '--template', c.template]
     argv += ['--clean'] if c.hpc.clean else []
+    argv += ['--gate', str(c.hpc.gateRetries)] if c.hpc.gate else []
     with _in(c.stack):
         return _run_script_main('write_slurmJobs', argv + list(extra))
 

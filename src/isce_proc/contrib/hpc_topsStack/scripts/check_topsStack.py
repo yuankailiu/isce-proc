@@ -14,6 +14,7 @@ Run from the stack directory or its run_files/:
   check_topsStack.py 15 --rerun            # also print the sbatch commands for bad rows
   check_topsStack.py 15 --rerun --submit   # submit them, and make the next queued
                                            # step wait for them (job_id_logfile_*.txt)
+  check_topsStack.py 15 --gate 2           # (gate.job) rerun up to 2x, wait, exit 1 if still bad
 """
 import argparse, glob, os, re, subprocess, sys
 from concurrent.futures import ThreadPoolExecutor
@@ -127,11 +128,91 @@ def parse_steps(args, runs):
     return sorted(sel)
 
 
+def evaluate(step, args, strict=False):
+    """(cmds, bad, n_cleaned) for one step; print a summary. strict: rows of log-only steps need an OK log."""
+    cmds = [l.strip() for l in open(step) if l.strip()]
+    with ThreadPoolExecutor(args.nproc) as ex:
+        probs = list(ex.map(check_row, cmds))
+    logs = latest_logs(step)
+    has_out = [bool(outputs(c)) for c in cmds]
+    rows = {}
+    for r, p in enumerate(probs, 1):
+        log = logs.get(r, (None, 'no log'))
+        if args.cleaned_ok:
+            p = [x for x in p if not x.endswith(': cleaned')]
+        if p or (not has_out[r - 1] and (log[1] == 'error' or (strict and log[1] != 'ok'))):
+            rows[r] = (p, log)
+    n_cleaned = sum(1 for p, _ in rows.values() if p and all(x.endswith(': cleaned') for x in p))
+    bad = {r: v for r, v in rows.items() if not (v[0] and all(x.endswith(': cleaned') for x in v[0]))}
+    checked = 'outputs' if any(has_out[:3]) else 'logs only'
+    print(f'{step:40s} rows {len(cmds):5d}  bad {len(bad):5d}  cleaned {n_cleaned:5d}  ({checked})')
+    for r, (p, (f, st)) in list(bad.items())[:None if args.verbose else 5]:
+        print(f'    row {r:5d}  log: {st:10s} {f or "-"}\n              {p[0] if p else "log: " + st}'
+              + (f'  (+{len(p) - 1} more)' if len(p) > 1 else ''))
+    return cmds, bad, n_cleaned
+
+
+def submit_reruns(step, bad, submit):
+    """sbatch the bad rows, per .pN job file; return new job IDs (none if not submitting)."""
+    parts = {}
+    for r in sorted(bad):
+        parts.setdefault((r - 1) // MAX_ARRAY + 1, []).append((r - 1) % MAX_ARRAY + 1)
+    multi = os.path.exists(f'{step}.p1.job')
+    new_ids = []
+    for p, tasks in parts.items():
+        job = f'{step}.p{p}.job' if multi else f'{step}.job'
+        cmd = ['sbatch', '--parsable', f'--array={",".join(map(str, tasks))}', job]
+        print('    ' + ' '.join(cmd))
+        if submit:
+            new_ids.append(subprocess.run(cmd, capture_output=True, text=True, check=True).stdout.strip())
+    if submit:
+        print(f'    submitted {new_ids}')
+    return new_ids
+
+
+def active(ids):
+    return bool(ids) and bool(subprocess.run(['squeue', '-h', '-j', ','.join(ids)],
+                                             capture_output=True, text=True).stdout.strip())
+
+
+def relink_next(runs, n, step, new_ids):
+    """Make the next queued step wait for the reruns as well (afterany: this step, afterok: reruns)."""
+    nxt = next((runs[m] for m in sorted(runs) if m > n), None)
+    nxt_ids = step_ids(nxt) if nxt else []
+    if nxt_ids:
+        dep = ','.join([f'afterany:{j}' for j in step_ids(step)] + [f'afterok:{j}' for j in new_ids])
+        r = subprocess.run(['scontrol', 'update', f'jobid={nxt_ids[0]}', f'dependency={dep}'],
+                           capture_output=True, text=True)
+        print(f'    {nxt} ({nxt_ids[0]}) now waits for: {dep}' if r.returncode == 0 else
+              f'    could not re-link {nxt} ({nxt_ids[0]}): {r.stderr.strip()}')
+
+
+def gate(step, args, retries, poll=60):
+    """Check a finished step; rerun bad rows up to `retries` times, waiting for each rerun.
+    Exit 0 when every row is good, else 1 (the next step, afterok on this gate, then never starts)."""
+    import time
+    for attempt in range(retries + 1):
+        _, bad, _ = evaluate(step, args, strict=True)
+        if not bad:
+            print(f'gate {step}: all rows good')
+            return 0
+        if attempt == retries:
+            break
+        print(f'gate {step}: rerun {attempt + 1}/{retries} of {len(bad)} rows')
+        ids = submit_reruns(step, bad, submit=True)
+        while active(ids):
+            time.sleep(poll)
+    print(f'gate {step}: {len(bad)} rows still bad after {retries} reruns; stopping the chain')
+    return 1
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('steps', nargs='*', help='step numbers or ranges, e.g. 13 15-16 (default: all)')
     ap.add_argument('--rerun', action='store_true', help='print sbatch commands for the bad rows')
     ap.add_argument('--submit', action='store_true', help='with --rerun: submit them and re-link the next step')
+    ap.add_argument('--gate', type=int, metavar='N', help='gate mode (in gate.job): rerun bad rows up to N times, '
+                    'wait for them, exit non-zero if rows are still bad')
     ap.add_argument('--cleaned-ok', action='store_true', help='count "cleaned" outputs as OK (default: reported)')
     ap.add_argument('-n', '--nproc', type=int, default=32)
     ap.add_argument('-v', '--verbose', action='store_true', help='list every bad row')
@@ -144,58 +225,24 @@ def main():
     runs = {int(m.group(1)): f for f in os.listdir('.') for m in [re.fullmatch(r'run_(\d+)_\w+', f)] if m}
     steps = parse_steps(args.steps, runs)
 
-    for i, n in enumerate(steps):
+    if args.gate is not None:
+        if len(steps) != 1:
+            sys.exit('--gate takes exactly one step')
+        return gate(runs[steps[0]], args, args.gate)
+
+    for n in steps:
         step = runs[n]
-        cmds = [l.strip() for l in open(step) if l.strip()]
-        with ThreadPoolExecutor(args.nproc) as ex:
-            probs = list(ex.map(check_row, cmds))
-        logs = latest_logs(step)
-        rows = {}
-        for r, p in enumerate(probs, 1):
-            log = logs.get(r, (None, 'no log'))
-            if args.cleaned_ok:
-                p = [x for x in p if not x.endswith(': cleaned')]
-            if p or log[1] == 'error' and not outputs(cmds[r - 1]):
-                rows[r] = (p, log)
-        n_cleaned = sum(1 for p, _ in rows.values() if p and all(x.endswith(': cleaned') for x in p))
-        bad = {r: v for r, v in rows.items() if not (v[0] and all(x.endswith(': cleaned') for x in v[0]))}
-        checked = 'outputs' if any(outputs(c) for c in cmds[:3]) else 'logs only'
-        print(f'{step:40s} rows {len(cmds):5d}  bad {len(bad):5d}  cleaned {n_cleaned:5d}  ({checked})')
-        for r, (p, (f, st)) in list(bad.items())[:None if args.verbose else 5]:
-            print(f'    row {r:5d}  log: {st:10s} {f or "-"}\n              {p[0] if p else "log shows an error"}'
-                  + (f'  (+{len(p) - 1} more)' if len(p) > 1 else ''))
+        _, bad, _ = evaluate(step, args)
         if not (args.rerun and bad):
             continue
-
-        # rerun the bad rows of this step, per .pN job file
-        parts = {}
-        for r in sorted(bad):
-            parts.setdefault((r - 1) // MAX_ARRAY + 1, []).append((r - 1) % MAX_ARRAY + 1)
-        multi = os.path.exists(f'{step}.p1.job')
-        ids = step_ids(step)
-        active = ids and subprocess.run(['squeue', '-h', '-j', ','.join(ids)], capture_output=True, text=True).stdout.strip()
-        submit = args.submit and not active
-        if args.submit and active:
+        busy = active(step_ids(step))
+        if args.submit and busy:
             print(f'    not submitting: {step} still has queued/running tasks (a rerun would duplicate them)')
-        new_ids = []
-        for p, tasks in parts.items():
-            job = f'{step}.p{p}.job' if multi else f'{step}.job'
-            cmd = ['sbatch', '--parsable', f'--array={",".join(map(str, tasks))}', job]
-            print('    ' + ' '.join(cmd))
-            if submit:
-                new_ids.append(subprocess.run(cmd, capture_output=True, text=True, check=True).stdout.strip())
-        if submit:
-            print(f'    submitted {new_ids}')
-            nxt = next((runs[m] for m in sorted(runs) if m > n), None)
-            nxt_ids = step_ids(nxt) if nxt else []
-            if nxt_ids:
-                dep = ','.join([f'afterany:{j}' for j in step_ids(step)] + [f'afterok:{j}' for j in new_ids])
-                r = subprocess.run(['scontrol', 'update', f'jobid={nxt_ids[0]}', f'dependency={dep}'],
-                                   capture_output=True, text=True)
-                print(f'    {nxt} ({nxt_ids[0]}) now waits for: {dep}' if r.returncode == 0 else
-                      f'    could not re-link {nxt} ({nxt_ids[0]}): {r.stderr.strip()}')
+        new_ids = submit_reruns(step, bad, submit=args.submit and not busy)
+        if new_ids:
+            relink_next(runs, n, step, new_ids)
 
 
 if __name__ == '__main__':
     sys.stdout.reconfigure(line_buffering=True)
-    main()
+    sys.exit(main())
