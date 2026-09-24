@@ -9,8 +9,7 @@
 #SBATCH --nodes={nodes}                             # number of nodes
 #SBATCH --ntasks={ntasks}                           # Total number of tasks
 #SBATCH --cpus-per-task={ncpus_per_task}	        # CPU cores/threads per task
-#SBATCH --gres=gpu:{gres}                           # number of GPUs per node (used for geo2rdr steps)
-#SBATCH --mem-per-cpu={mem}                         # memory per CPU core (Need to fix by trial and error)
+{gres_line}#SBATCH --mem-per-cpu={mem}                         # memory per CPU core (Need to fix by trial and error)
 #SBATCH -J "{step_index}_{step_name}_{track}"	    # job name
 #SBATCH --output={log_name}                         # Format of output log file (%j = job id)
 #SBATCH --mail-user={mail}                           # User email address

@@ -89,6 +89,7 @@ hpc.ompTopo             = auto                       #OMP threads per process in
 hpc.clean               = auto                       #[yes / no], activate the deletion lines in the jobs, auto for no
 hpc.gate                = auto                       #[yes / no], check outputs (and rerun bad rows) between steps, auto for no
 hpc.gateRetries         = auto                       #reruns per step by the gate before it stops the chain, auto for 2
+hpc.gpuType             = auto                       #GPU type for GPU steps (isce.useGPU = yes), auto for v100
 hpc.exportDir           = auto                       #target of `topsstack.py export`, auto for none
 hpc.costPerCpuHour      = auto                       #$ per CPU hour for `topsstack.py report`, auto for 0.008
 """
@@ -168,6 +169,7 @@ AUTO_DICT = {
     'hpc.clean'               : False,
     'hpc.gate'                : False,
     'hpc.gateRetries'         : 2,
+    'hpc.gpuType'             : 'v100',
     'hpc.exportDir'           : None,
     'hpc.costPerCpuHour'      : 0.008,
 }

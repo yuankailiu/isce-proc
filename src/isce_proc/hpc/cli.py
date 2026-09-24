@@ -69,6 +69,7 @@ def cmd_jobs(c, extra):
             '--template', c.template]
     argv += ['--clean'] if c.hpc.clean else []
     argv += ['--gate', str(c.hpc.gateRetries)] if c.hpc.gate else []
+    argv += ['--gpu-type', c.hpc.gpuType] + ([] if c.isce.useGPU else ['--no-gpu'])
     with _in(c.stack):
         return _run_script_main('write_slurmJobs', argv + list(extra))
 

@@ -114,6 +114,11 @@ def cmdLineParse():
                         help = 'write the deletion lines active instead of commented out')
     parser.add_argument('--gate', dest='gate', type=int, default=None, metavar='N',
                         help = 'write gate.job: between steps, check outputs and rerun bad rows up to N times')
+    parser.add_argument('--gpu-type', dest='gpu_type', type=str, default='v100',
+                        help = 'GPU type for steps with Gres > 0 in resources.cfg (default: %(default)s; '
+                               'Slurm here requires --gres=gpu:<type>:<count>)')
+    parser.add_argument('--no-gpu', dest='no_gpu', action='store_true',
+                        help = 'request no GPU for any step (isce.useGPU = no)')
     parser.add_argument('--template', dest='template', type=str, default=None,
                         help = 'track template; run_atTheEnd.sh then calls `topsstack.py report` with it')
     parser.add_argument('--account', dest='account', type=str, default=GROUPNAME,
@@ -210,8 +215,11 @@ def write_job_scripts(inps):
 
         # assign to a HPC partition w/ or w/o gpus
         # The default partition for The Resnick HPCC will change from “any” (CentOS 7) to “expansion” (RHEL 9) on Tuesday, March 26th.
-        if int(gres) > 0: partition = 'gpu'
+        gres = 0 if inps.no_gpu else int(gres)
+        if gres > 0: partition = 'gpu'
         else: partition = 'expansion'
+        gres_line = (f'#SBATCH --gres=gpu:{inps.gpu_type}:{gres}                  # GPUs (geo2rdr steps)\n'
+                     if gres > 0 else '')
 
         # split the rows into parts: at program changes (e.g. run_22: computeIon.py rows, then the
         # mergeSwathIon.py rows that need them; parts run one after another) and at the array limit
@@ -242,7 +250,7 @@ def write_job_scripts(inps):
                 "row_id0"           :   row_id0,
                 "task_id1"          :   task_id1,
                 "max_task"          :   max_task,
-                "gres"              :   gres,
+                "gres_line"         :   gres_line,
                 "partition"         :   partition,
                 "mem"               :   mem,
                 # topo runs a python pool of Ncpus_per_task/omp_topo processes, each with omp_topo threads
