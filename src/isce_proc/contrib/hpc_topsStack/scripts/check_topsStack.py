@@ -193,13 +193,21 @@ def submit_reruns(step, bad, submit):
     new_ids = []
     for sfx, tasks in sorted(parts.items()):
         job = f'{step}.{sfx}.job' if sfx else f'{step}.job'
-        cmd = ['sbatch', '--parsable', f'--array={",".join(map(str, tasks))}', job]
-        print('    ' + ' '.join(cmd))
+        args = [f'--array={",".join(map(str, tasks))}', job]
+        print('    sbatch ' + ' '.join(args))
         if submit:
-            new_ids.append(subprocess.run(cmd, capture_output=True, text=True, check=True).stdout.strip())
+            new_ids.append(sbatch(args))
     if submit:
         print(f'    submitted {new_ids}')
     return new_ids
+
+
+def sbatch(args):
+    """sbatch without the SLURM_* variables inherited when running inside a job (the gate): e.g. the
+    gate's SLURM_MEM_PER_NODE plus the rerun's --mem-per-cpu make srun abort ('mutually exclusive')."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith('SLURM_')}
+    return subprocess.run(['sbatch', '--parsable', *args], capture_output=True, text=True, check=True,
+                          env=env).stdout.strip()
 
 
 def active(ids):
@@ -237,9 +245,8 @@ def gate(step, args, retries):
     me = os.environ.get('SLURM_JOB_ID')
     print(f'gate {step}: rerun {attempt + 1}/{retries} of {len(bad)} rows')
     ids = submit_reruns(step, bad, submit=True)
-    nxt = subprocess.run(['sbatch', '--parsable', f'--dependency=afterany:{":".join(ids)}',
-                          f'--export=ALL,STEP={step},GATE_ATTEMPT={attempt + 1}', 'gate.job'],
-                         capture_output=True, text=True, check=True).stdout.strip()
+    nxt = sbatch([f'--dependency=afterany:{":".join(ids)}', f'--export=ALL,STEP={step},GATE_ATTEMPT={attempt + 1}',
+                  'gate.job'])
     with open(sorted(glob.glob('job_id_logfile_*.txt'), key=os.path.getmtime)[-1], 'a') as f:
         f.write(f'{"gate_" + step:50s} {nxt}\n')
     moved = []
