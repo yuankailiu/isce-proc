@@ -70,10 +70,11 @@ printf "%-35s%-12s%-12s%-12s%-12s\\n" "${{STEP#run_??_}}" "${{STEP:0:6}}" "$SLUR
 
 GATE_JOB = """#!/bin/bash
 # Gate between two steps, submitted by submit_chained_dependencies.sh with
-#   --dependency=afterany:<all parts of the step> --export=ALL,STEP=<run_file>
+#   --dependency=afterany:<all parts of the step> --export=ALL,STEP=<run_file>[,GATE_FINAL=1]
 # Checks the step's outputs row by row (check_topsStack.py). Bad rows: submits the reruns and a
 # follow-up gate (up to {retries} times) and moves the next step onto that gate; still bad after
-# that: exits non-zero, the next step (afterok) never starts, and you get a FAIL mail.
+# that: exits non-zero (the next step never starts) and mails what failed and what to run.
+# After the last step (GATE_FINAL=1) it mails a summary when everything is good.
 # Short time limit on purpose: small jobs start quickly through backfill.
 #SBATCH -A {groupname}
 #SBATCH -J gate_{track}
@@ -82,11 +83,17 @@ GATE_JOB = """#!/bin/bash
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=4G
 #SBATCH --partition=expansion
-#SBATCH --mail-user={mail}
-#SBATCH --mail-type=FAIL
+#SBATCH --mail-type=NONE
 #SBATCH --output=slurm-gate-%j.out
 
+export TOPSSTACK_MAIL={mail} TOPSSTACK_TRACK={track} TOPSSTACK_TEMPLATE={template} TOPSSTACK_BIN={topsstack}
 {python} check_topsStack.py "$(echo "$STEP" | cut -d_ -f2)" --gate {retries} -n 2
+rc=$?
+if [ $rc -ne 0 ] && [ ! -f ".gate_mailed_$SLURM_JOB_ID" ]; then     # the gate itself failed (no mail sent)
+    tail -30 "slurm-gate-$SLURM_JOB_ID.out" | mail -s "[topsstack {track}] gate for $STEP failed (rc=$rc), chain stopped" {mail}
+fi
+rm -f ".gate_mailed_$SLURM_JOB_ID"
+exit $rc
 """
 
 
@@ -120,7 +127,7 @@ def cmdLineParse():
                                'Slurm here requires --gres=gpu:<type>:<count>)')
     parser.add_argument('--no-gpu', dest='no_gpu', action='store_true',
                         help = 'request no GPU for any step (isce.useGPU = no)')
-    parser.add_argument('--template', dest='template', type=str, default=None,
+    parser.add_argument('--template', dest='track_template', type=str, default=None,
                         help = 'track template; run_atTheEnd.sh then calls `topsstack.py report` with it')
     parser.add_argument('--account', dest='account', type=str, default=GROUPNAME,
                         help = 'Slurm account (default: %(default)s)')
@@ -247,7 +254,8 @@ def write_job_scripts(inps):
                 "step_script"       :   step_script,
                 "step_index"        :   index+1,
                 "mail"              :   inps.mail,
-                "mail_type"         :   'FAIL,END' if is_last else 'FAIL',  # email when the final step finishes
+                # with the gate, the gates send the (detailed) mails; plain chain: Slurm FAIL / final END
+                "mail_type"         :   'NONE' if inps.gate is not None else ('FAIL,END' if is_last else 'FAIL'),
                 "row_id0"           :   row_id0,
                 "task_id1"          :   task_id1,
                 "max_task"          :   max_task,
@@ -270,7 +278,8 @@ def write_job_scripts(inps):
     if inps.gate is not None:
         with open('gate.job', 'w') as outf:
             outf.write(GATE_JOB.format(groupname=inps.account, track=inps.track_no, mail=inps.mail,
-                                       retries=inps.gate, python=sys.executable))
+                                       retries=inps.gate, python=sys.executable, template=inps.track_template or '',
+                                       topsstack=SCRIPT_DIR.parents[2] / 'topsstack.py'))
         print(f' gate.job (reruns per step: {inps.gate})')
     elif os.path.exists('gate.job'):
         os.remove('gate.job')                            # gate off: plain afterok chain
@@ -327,7 +336,7 @@ def main(iargs=None):
     write_job_scripts(inps)
 
     # write end cmmands for post-documenting
-    write_end_cmd(inps.template)
+    write_end_cmd(inps.track_template)
 
     # done
     print('Now run `bash submit_chained_dependencies.sh` here for jobs submission!')

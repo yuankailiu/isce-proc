@@ -227,6 +227,23 @@ def relink_next(runs, n, step, new_ids):
               f'    could not re-link {nxt} ({nxt_ids[0]}): {r.stderr.strip()}')
 
 
+def notify(subject, body):
+    """Mail from a gate job (TOPSSTACK_MAIL set in gate.job); also leaves a marker so gate.job does not
+    send its fallback 'gate crashed' mail. Returns True if sent."""
+    to = os.environ.get('TOPSSTACK_MAIL')
+    if not to:
+        return False
+    r = subprocess.run(['mail', '-s', subject, to], input=body, text=True, capture_output=True)
+    open(f'.gate_mailed_{os.environ.get("SLURM_JOB_ID", "x")}', 'w').close()
+    return r.returncode == 0
+
+
+def _ctx():
+    """(track, template, stack dir) for mail texts."""
+    return (os.environ.get('TOPSSTACK_TRACK', '?'), os.environ.get('TOPSSTACK_TEMPLATE', '<template>'),
+            os.path.dirname(os.getcwd()))
+
+
 def gate(step, args, retries):
     """Gate job between two steps (gate.job, afterany on all parts of `step`). Exits in minutes:
     - all rows good                      -> exit 0 (the next step, afterok on this gate, starts)
@@ -235,12 +252,39 @@ def gate(step, args, retries):
     - bad rows, no retries left          -> exit 1 (the next step never starts; FAIL mail)
     Short gates start quickly (backfill); waiting for reruns is left to Slurm dependencies."""
     attempt = int(os.environ.get('GATE_ATTEMPT', '0'))
-    _, bad, _ = evaluate(step, args, strict=True)
+    cmds, bad, _ = evaluate(step, args, strict=True)
+    track, template, stack = _ctx()
+    num = re.match(r'run_(\d+)_', step).group(1)
     if not bad:
         print(f'gate {step}: all rows good')
+        if os.environ.get('GATE_FINAL'):
+            final_mail(step, args)
         return 0
     if attempt >= retries:
         print(f'gate {step}: {len(bad)} rows still bad after {retries} reruns; stopping the chain')
+        rows = '\n'.join(f'  row {r:5d}  {(p[0] if p else "log: " + st)}\n             log: {f or "-"}'
+                         for r, (p, (f, st)) in list(bad.items())[:30])
+        more = f'\n  ... and {len(bad) - 30} more' if len(bad) > 30 else ''
+        body = f"""The topsStack chain of {track} stopped after {step}.
+
+{len(bad)} of {len(cmds)} rows are still missing outputs after {retries} automatic rerun(s).
+The later steps are waiting on this gate and will not start (they stay pending; cancel or
+resubmit them as below).
+
+Bad rows (first 30):
+{rows}{more}
+
+Next:
+  cd {stack}
+  topsstack.py status {template} {num} -v                 # all bad rows and their logs
+  # fix the cause, then either rerun just these rows and re-link the queued steps:
+  topsstack.py status {template} {num} --rerun --submit
+  # or cancel what is queued and resubmit from this step:
+  topsstack.py submit {template} -s {num}
+
+Gate log: {os.getcwd()}/slurm-gate-{os.environ.get('SLURM_JOB_ID', '?')}.out
+"""
+        notify(f'[topsstack {track}] STOPPED at step {num} ({step[7:]}): {len(bad)} rows bad after {retries} reruns', body)
         return 1
     me = os.environ.get('SLURM_JOB_ID')
     print(f'gate {step}: rerun {attempt + 1}/{retries} of {len(bad)} rows')
@@ -261,6 +305,32 @@ def gate(step, args, retries):
                 moved.append(jid.split('_')[0])
     print(f'gate {step}: follow-up gate {nxt} waits for {ids}; moved {sorted(set(moved))} to afterok:{nxt}')
     return 0
+
+
+def final_mail(last, args):
+    """Mail at the end of the chain: per-step row check and, if available, the resource report."""
+    track, template, stack = _ctx()
+    runs = sorted(f for f in os.listdir('.') if re.fullmatch(r'run_\d+_\w+', f))
+    lines = []
+    for r in runs:
+        if r > last:
+            break
+        cmds, bad, n_cl = evaluate(r, args)
+        lines.append(f'  {r:40s} rows {len(cmds):5d}  bad {len(bad):5d}  cleaned {n_cl:5d}')
+    bin_ = os.environ.get('TOPSSTACK_BIN')                  # set in gate.job
+    rep = subprocess.run([sys.executable, bin_, 'report', template], capture_output=True, text=True, cwd=stack) \
+        if bin_ and template != '<template>' else None
+    report = rep.stdout if rep and rep.returncode == 0 else '(report not available; run `topsstack.py report` in the stack)'
+    body = f"""The topsStack chain of {track} finished: the last submitted step, {last}, passed its check.
+
+Rows per step (outputs checked on disk):
+""" + '\n'.join(lines) + f"""
+
+Resources (topsstack.py report):
+{report}
+Stack: {stack}
+"""
+    notify(f'[topsstack {track}] finished through step {last[4:6]} ({last[7:]}): all rows good', body)
 
 
 def main():
