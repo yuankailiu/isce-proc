@@ -127,12 +127,10 @@ def run_sh_file(sh_file, text_cmd=None, num_proc=1):
 
     # check num_proc against number of lines
     def get_file_line_number(fname):
-        with open(sh_file, 'r') as f:
-            for i, l in enumerate(f):
-                pass
-        return i + 1
+        with open(fname, 'r') as f:
+            return sum(1 for _ in f)
 
-    num_line = get_file_line_number(sh_file)
+    num_line = max(get_file_line_number(sh_file), 1)
     num_proc = min(int(num_proc), num_line)
 
     # compose command line
@@ -165,7 +163,7 @@ def run_stack(iDict, run_file_dir='run_files'):
     # path setup for the stack processor
     isce_stack_dir = os.path.expandvars('${ISCE_STACK}')
     print(f'load ISCE-2 {iDict["processor"]} from {isce_stack_dir}/{iDict["processor"]}')
-    os.system('export PATH=${PATH}:${ISCE_STACK}/' + f'{iDict["processor"]}')
+    os.environ['PATH'] += os.pathsep + os.path.join(isce_stack_dir, iDict['processor'])   # os.system('export ...') had no effect
 
     # go to run_files directory
     dir_orig = os.path.abspath(os.getcwd())
@@ -173,11 +171,7 @@ def run_stack(iDict, run_file_dir='run_files'):
     os.chdir(run_file_dir)
     print('go to directory: {}'.format(run_file_dir))
 
-    # remove un-necessary *.job files
-    job_files = glob.glob(os.path.join(run_file_dir, 'run_*_*.job'))
-    for job_file in job_files:
-        os.remove(job_file)
-        print('remove file: {}'.format(job_file))
+    # (the *.job files are the Slurm scripts written by topsstack.py jobs; keep them)
 
     # grab all run files
     run_files = glob.glob(os.path.join(run_file_dir, 'run_[0-9][0-9]_*'))
@@ -391,7 +385,7 @@ def prep_stack(iDict):
         isce_stack_path = os.path.expandvars('$ISCE_STACK/topsStack')
     else:
         from stripmapStack import stackStripMap as isce_stack
-        isce_stack_path = os.path.expandvars('$ISCE_STACK/topsStack')
+        isce_stack_path = os.path.expandvars('$ISCE_STACK/stripmapStack')
     os.environ["PATH"] = os.environ["PATH"] + os.pathsep + isce_stack_path
     scp_name = os.path.basename(isce_stack.__file__)
 

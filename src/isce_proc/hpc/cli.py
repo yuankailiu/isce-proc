@@ -10,7 +10,7 @@ import sys
 from contextlib import contextmanager
 from pathlib import Path
 
-from isce_proc.hpc import config, data
+from isce_proc.hpc import config, data, export, plot, report, stack
 
 SCRIPTS = Path(__file__).resolve().parents[1] / 'contrib' / 'hpc_topsStack' / 'scripts'
 
@@ -22,6 +22,9 @@ EXAMPLE = """examples (from the stack directory, e.g. chile/a076/hpc_topsStack):
   topsstack.py inspect  ChileSenAT076.txt                # s1_version.txt, epochs_latlon.png, ...
   topsstack.py select   ChileSenAT076.txt                # s1_select_ion.py (moves bad slices)
   topsstack.py dem      ChileSenAT076.txt                # DEM + water body
+  topsstack.py stack  ChileSenAT076.txt                  # run_isce_stack.py: configs/, run_files/
+  topsstack.py stack  ChileSenAT076.txt --ion-config     # filtIon/burstRampIon keys (was filtIon_config.sh)
+  topsstack.py stack  ChileSenAT076.txt --select-pairs 5 10
   topsstack.py show   ChileSenAT076.txt                  # resolved settings
   topsstack.py jobs   ChileSenAT076.txt                  # write run_files/*.job (+ helpers)
   topsstack.py submit ChileSenAT076.txt -s 17 -e 20      # submit steps 17-20 as an afterok chain
@@ -29,6 +32,9 @@ EXAMPLE = """examples (from the stack directory, e.g. chile/a076/hpc_topsStack):
   topsstack.py status ChileSenAT076.txt 15 --rerun --submit
   topsstack.py clean  ChileSenAT076.txt                  # kill-after table for this stack
   topsstack.py clean  ChileSenAT076.txt esd coreg_overlap --delete
+  topsstack.py report ChileSenAT076.txt                  # time/CPU/memory/cost/size per step
+  topsstack.py plot   ChileSenAT076.txt ion              # or unw, baselines, network
+  topsstack.py export ChileSenAT076.txt --dry-run        # copy to hpc.exportDir
 """
 
 
@@ -59,7 +65,8 @@ def cmd_show(c, extra):
 
 
 def cmd_jobs(c, extra):
-    argv = ['-t', c.hpc.track, '--omp-topo', str(c.hpc.ompTopo), '--account', c.hpc.account, '--mail', c.hpc.mail]
+    argv = ['-t', c.hpc.track, '--omp-topo', str(c.hpc.ompTopo), '--account', c.hpc.account, '--mail', c.hpc.mail,
+            '--template', c.template]
     argv += ['--clean'] if c.hpc.clean else []
     with _in(c.stack):
         return _run_script_main('write_slurmJobs', argv + list(extra))
@@ -115,17 +122,52 @@ def cmd_dem(c, extra):
     return data.dem(c, extra)
 
 
+def cmd_stack(c, extra):
+    ap = argparse.ArgumentParser(prog='topsstack.py stack TEMPLATE')
+    ap.add_argument('--ion-config', action='store_true', help='set filtIon/burstRampIon config keys from ion.* (idempotent)')
+    ap.add_argument('--select-pairs', nargs='*', type=int, metavar=('N', 'BRIDGE'),
+                    help='thin steps 13-16 to N nearest pairs (+ one BRIDGE dates ahead); default select.*')
+    a, rest = ap.parse_known_args(extra)
+    if a.ion_config:
+        return stack.ion_config(c)
+    if a.select_pairs is not None:
+        return stack.select_pairs(c, *a.select_pairs[:2])
+    return stack.prep(c, rest)
+
+
+def cmd_report(c, extra):
+    return report.report(c, extra)
+
+
+def cmd_export(c, extra):
+    ap = argparse.ArgumentParser(prog='topsstack.py export TEMPLATE')
+    ap.add_argument('--dry-run', action='store_true')
+    ap.add_argument('-n', '--nproc', type=int, default=4)
+    a = ap.parse_args(extra)
+    return export.export(c, dry_run=a.dry_run, nproc=a.nproc)
+
+
+def cmd_plot(c, extra):
+    if not extra:
+        sys.exit('topsstack.py plot TEMPLATE {ion,unw,baselines,network} [tool options]')
+    return plot.plot(c, extra[0], extra[1:])
+
+
 COMMANDS = {
     'search':   (cmd_search,   'ASF search from asf.* -> data/search_results.csv/kml'),
     'download': (cmd_download, 'download/verify SLC zips (resumable; --slurm N for parallel shards)'),
     'inspect':  (cmd_inspect,  'SLC versions/starting ranges/slices and latitude extent (s1_version.py, s1_kml_latlon.py)'),
     'select':   (cmd_select,   'topsStack s1_select_ion.py: move unusable slices to not_used/'),
     'dem':      (cmd_dem,      'DEM and water body over dem.snwe (download_dem.sh)'),
+    'stack':    (cmd_stack,    'run files (run_isce_stack.py); --ion-config; --select-pairs N [BRIDGE]'),
     'show':   (cmd_show,   'print the settings resolved from the template'),
     'jobs':   (cmd_jobs,   'write Slurm job files into run_files/ (write_slurmJobs.py)'),
     'submit': (cmd_submit, 'submit job files as an afterok chain (submit_chained_dependencies.sh)'),
     'status': (cmd_status, 'check outputs per row, optionally rerun bad rows (check_topsStack.py)'),
     'clean':  (cmd_clean,  'delete intermediate files after their last reader (clean_topsStack.py)'),
+    'report': (cmd_report, 'per-step time, CPU, memory, cost, disk use (sacct) -> logs/report_<date>.*'),
+    'plot':   (cmd_plot,   'quick-look figures into pic/: ion, unw, baselines, network'),
+    'export': (cmd_export, 'copy products and records to hpc.exportDir (rsync; --dry-run)'),
 }
 
 

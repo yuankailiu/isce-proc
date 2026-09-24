@@ -48,7 +48,7 @@ SLURM_MAX_ARRAY_SIZE = 1000
 ######################## --------------------  ########################
 
 # copied into run_files/ so the stack is self-contained
-HELPERS = ['submit_chained_dependencies.sh', 'clean_topsStack.py', 'check_topsStack.py', 'analyse_time_resource.py']
+HELPERS = ['submit_chained_dependencies.sh', 'clean_topsStack.py', 'check_topsStack.py']
 
 DISK_JOB = """#!/bin/bash
 # Record the stack size after a step. Submitted by submit_chained_dependencies.sh with
@@ -92,6 +92,8 @@ def cmdLineParse():
                                'its python pool uses Ncpus_per_task / this many processes')
     parser.add_argument('--clean', dest='clean', action='store_true',
                         help = 'write the deletion lines active instead of commented out')
+    parser.add_argument('--template', dest='template', type=str, default=None,
+                        help = 'track template; run_atTheEnd.sh then calls `topsstack.py report` with it')
     parser.add_argument('--account', dest='account', type=str, default=GROUPNAME,
                         help = 'Slurm account (default: %(default)s)')
     parser.add_argument('--mail', dest='mail', type=str, default=f'{mail_user}@caltech.edu',
@@ -233,16 +235,15 @@ def write_job_scripts(inps):
     print(f'create job scripts for {inps.track_no}.')
 
 
-def write_end_cmd(cmd_script='run_atTheEnd.sh', log_dir='log_files'):
-    """Create a final bash cmd for logfiles & ime documenting
-    """
+def write_end_cmd(template=None, cmd_script='run_atTheEnd.sh'):
+    """Create a final bash cmd for resource/timing reporting (moves no files: status/clean/report read them here)."""
+    topsstack = SCRIPT_DIR.parents[2] / 'topsstack.py'
     with open(cmd_script, 'w') as outf:
-        outf.write(f'#!/bin/bash\n')
-        outf.write(f'# Commands after topsStack processing. Run this after all the jobs are finished\n\n')
-        outf.write(f'mkdir -p {log_dir}\n')
-        outf.write(f'mv *.out *.txt *.log {log_dir}/ \n')
-        outf.write(f'reportseff ./{log_dir} --no-color > {log_dir}/reportseff_all.txt\n')
-        outf.write(f'python analyse_time_resource.py\n')
+        outf.write('#!/bin/bash\n')
+        outf.write('# Commands after topsStack processing. Run this after all the jobs are finished\n\n')
+        outf.write('command -v reportseff >/dev/null && reportseff . --no-color > reportseff_all.txt\n')
+        if template:
+            outf.write(f'{sys.executable} {topsstack} report {template}\n')
     print(f'create {cmd_script} to run by yourself after all jobs on HPC finished.')
 
 
@@ -279,7 +280,7 @@ def main(iargs=None):
     write_job_scripts(inps)
 
     # write end cmmands for post-documenting
-    write_end_cmd()
+    write_end_cmd(inps.template)
 
     # done
     print('Now run `bash submit_chained_dependencies.sh` here for jobs submission!')

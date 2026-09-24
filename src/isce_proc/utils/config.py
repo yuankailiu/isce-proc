@@ -72,12 +72,25 @@ dem.waterBody           = auto                       #[yes / no], also make the 
 ## SLC selection (topsStack s1_select_ion.py)
 select.southNorth       = auto                       #[S, N], auto for S, N of isce.boundingBox
 select.minAcq           = auto                       #min no. of acquisitions with the same starting ranges, auto for 10
+select.numConnections   = auto                       #`stack --select-pairs`: nearest-neighbour pairs to keep, auto for none (keep all)
+select.bridge           = auto                       #`stack --select-pairs`: plus the pair this many dates ahead, auto for none
+## ionosphere config edits (`stack --ion-config`; replaces filtIon_config.sh)
+ion.wbdFile             = auto                       #water body for filtIon, auto: wbd_1_arcsec/ next to the DEM, same box
+ion.maskFile            = auto                       #extra mask for filtIon (e.g. otsu_msk.rdr), auto for none
+ion.iteration           = auto                       #filtIon iterations, auto for 5
+ion.fill                = auto                       #filtIon fill method, auto for nearest
+ion.swathAlign          = auto                       #[yes / no] swath_align for pairs in pairs_diff_starting_ranges.txt, auto for yes
+ion.burstRampMask       = auto                       #maskfile for burstRampIon, auto for merged/geom_reference/waterBody.rdr
 ## Slurm
 hpc.track               = auto                       #job name tag, auto from the template name (e.g. a076)
 hpc.account             = auto                       #Slurm account, auto for simonsgroup
 hpc.mail                = auto                       #mail address, auto for $USER@caltech.edu
 hpc.ompTopo             = auto                       #OMP threads per process in run_01, auto for 4
 hpc.clean               = auto                       #[yes / no], activate the deletion lines in the jobs, auto for no
+hpc.gate                = auto                       #[yes / no], check outputs (and rerun bad rows) between steps, auto for no
+hpc.gateRetries         = auto                       #reruns per step by the gate before it stops the chain, auto for 2
+hpc.exportDir           = auto                       #target of `topsstack.py export`, auto for none
+hpc.costPerCpuHour      = auto                       #$ per CPU hour for `topsstack.py report`, auto for 0.008
 """
 
 
@@ -140,9 +153,21 @@ AUTO_DICT = {
     'dem.waterBody'           : True,
     'select.southNorth'       : None,
     'select.minAcq'           : 10,
+    'select.numConnections'   : None,
+    'select.bridge'           : None,
+    'ion.wbdFile'             : None,
+    'ion.maskFile'            : None,
+    'ion.iteration'           : 5,
+    'ion.fill'                : 'nearest',
+    'ion.swathAlign'          : True,
+    'ion.burstRampMask'       : None,
     'hpc.track'               : None,
     'hpc.account'             : 'simonsgroup',
     'hpc.mail'                : None,
     'hpc.ompTopo'             : 4,
     'hpc.clean'               : False,
+    'hpc.gate'                : False,
+    'hpc.gateRetries'         : 2,
+    'hpc.exportDir'           : None,
+    'hpc.costPerCpuHour'      : 0.008,
 }

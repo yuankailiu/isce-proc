@@ -27,7 +27,7 @@ def load(template):
     raw = utils.check_template_auto_value(readfile.read_template(template), defaults.AUTO_DICT)
     group = lambda g: {k.split('.', 1)[1]: v for k, v in raw.items() if k.startswith(g + '.')}
     c = SimpleNamespace(template=template, stack=os.path.dirname(template),
-                        **{g: SimpleNamespace(**group(g)) for g in ('isce', 'asf', 'dem', 'select', 'hpc')})
+                        **{g: SimpleNamespace(**group(g)) for g in ('isce', 'asf', 'dem', 'select', 'hpc', 'ion')})
     name = os.path.splitext(os.path.basename(template))[0]
     m = NAME.search(name)
     bbox = _floats(c.isce.boundingBox)                      # S, N, W, E
@@ -57,17 +57,30 @@ def load(template):
     # select
     c.select.southNorth = _floats(c.select.southNorth) or (bbox[:2] if bbox else None)
     c.select.minAcq = int(c.select.minAcq)
+    c.select.numConnections = int(c.select.numConnections) if c.select.numConnections else None
+    c.select.bridge = int(c.select.bridge) if c.select.bridge else None
+
+    # ion: filtIon / burstRampIon config edits
+    dem = c.isce.demFile
+    if not c.ion.wbdFile and dem and os.path.basename(dem).startswith('demLat_'):
+        box = os.path.basename(dem)[len('demLat_'):].split('.dem')[0]            # S42_S06_Lon_W082_W062
+        cand = os.path.join(os.path.dirname(os.path.dirname(dem)), 'wbd_1_arcsec', f'swbdLat_{box}.wbd')
+        c.ion.wbdFile = cand if os.path.isfile(cand) else None
+    c.ion.iteration = int(c.ion.iteration)
+    c.ion.burstRampMask = c.ion.burstRampMask or os.path.join(c.stack, 'merged', 'geom_reference', 'waterBody.rdr')
 
     # hpc
     c.hpc.track = c.hpc.track or (f"{m['dir'].lower()}{int(m['orbit']):03d}" if m else name)
     c.hpc.mail = c.hpc.mail or f"{os.environ.get('USER', 'user')}@caltech.edu"
     c.hpc.ompTopo = int(c.hpc.ompTopo)
+    c.hpc.gateRetries = int(c.hpc.gateRetries)
+    c.hpc.costPerCpuHour = float(c.hpc.costPerCpuHour)
     return c
 
 
 def show(c):
     """Human-readable summary of the resolved settings."""
     lines = [f'template : {c.template}', f'stack    : {c.stack}', f'data     : {c.data}']
-    for g in ('asf', 'dem', 'select', 'hpc'):
+    for g in ('asf', 'dem', 'select', 'ion', 'hpc'):
         lines += [f'{g}.{k:16s} = {v}' for k, v in vars(getattr(c, g)).items()]
     return '\n'.join(lines)

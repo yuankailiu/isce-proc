@@ -63,8 +63,11 @@ def plot_baseline_network(baseline_data_dir, output_plot_dir, track_id, drop_dat
         print(f"Error: No sequential pairs formed from valid dates in '{baseline_data_dir}'. Check data.")
         return
 
-    # 2. Read baseline values for all pairs relative to the earliest date
-    reference_date = sorted_unique_dates[0]
+    # 2. Read baseline values relative to the stack reference date: topsStack names the folders
+    #    baselines/<reference>_<date>, so the reference is the first date shared by all folders
+    #    (not necessarily the earliest date, e.g. with a mid-stack isce.referenceDate)
+    firsts = [os.path.basename(d).split('_')[0] for d in pair_dirs]
+    reference_date = max(set(firsts), key=firsts.count)
     baseline_values = {}
     baseline_values[(reference_date, reference_date)] = 0.0 # Baseline of ref_date to itself is 0
 
