@@ -10,43 +10,134 @@ its commands to `logs/<subcommand>_<date>.log`, and is safe to re-run.
 Requires ISCE2 with topsStack (`stackSentinel.py -h`), MintPy, `asf_search`, and an Earthdata entry in
 `~/.netrc`. Optional: `reportseff`.
 
-## A new track
+## Step by step: a new track
+
+Example: Chile, ascending track 120, stack in `chile/a120/hpc_topsStack`. Replace the names with yours.
+
+### 0. Use this version (each new shell)
 
 ```bash
-mkdir -p mytrack/hpc_topsStack && cd mytrack/hpc_topsStack
-cp <an existing template> ChileSenAT076.txt     # edit isce.boundingBox, isce.demFile, ...
-mkdir -p inputs && cp <isce-proc>/src/isce_proc/contrib/hpc_topsStack/inputs/ion_param.txt inputs/   # for ionosphere
-ln -s ../data SLC
-topsstack.py show     ChileSenAT076.txt          # check the resolved settings
-
-topsstack.py search   ChileSenAT076.txt          # ASF search          -> ../data/search_results.csv/kml
-topsstack.py download ChileSenAT076.txt --slurm  # zips, 8 Slurm shards, resumable; --verify for CRC
-topsstack.py inspect  ChileSenAT076.txt          # s1_version.txt, s1_slice.txt, epochs_latlon.png, extent
-topsstack.py select   ChileSenAT076.txt          # s1_select_ion.py: unusable slices -> not_used/
-topsstack.py dem      ChileSenAT076.txt          # DEM + water body (if isce.demFile is not there yet)
-topsstack.py stack    ChileSenAT076.txt          # run_isce_stack.py: configs/, run_files/
-topsstack.py stack    ChileSenAT076.txt --ion-config        # filtIon/burstRampIon keys; computeIon order
-topsstack.py stack    ChileSenAT076.txt --select-pairs 5 10 # optional: thin the interferogram network
-topsstack.py jobs     ChileSenAT076.txt          # run_files/*.job (+ gate.job, disk_usage.job, helpers)
-topsstack.py submit   ChileSenAT076.txt          # the whole chain; -s/-e/-l for a range or list of steps
+source ~/tools/conda-envs/isce2/config.rc              # the usual environment
+export PATH=~/tools/isce-proc-v2/src/isce_proc:$PATH   # put topsstack.py (branch workflow-v2) first
+which topsstack.py                                     # -> ~/tools/isce-proc-v2/src/isce_proc/topsstack.py
 ```
 
-While it runs, and after:
+`topsstack.py` always uses the `isce_proc` code next to it, also in the scripts it starts, so the
+`ISCE_PROC_HOME` of `config.rc` (the old version) does not matter. Old tracks keep working with their
+own `run_files/` copies. To go back, open a new shell without the `export PATH` line.
+
+### 1. Make the stack directory and the template
 
 ```bash
-topsstack.py status   ChileSenAT076.txt 13-16    # rows per step with missing/incomplete outputs
-topsstack.py status   ChileSenAT076.txt 15 --rerun --submit   # rerun only those rows, re-link the chain
-topsstack.py clean    ChileSenAT076.txt          # what may be deleted when, for this stack
-topsstack.py clean    ChileSenAT076.txt esd coreg_overlap           # dry run (lists files, sizes)
-topsstack.py clean    ChileSenAT076.txt esd coreg_overlap --delete --reuse
-topsstack.py report   ChileSenAT076.txt          # time, CPU, memory, cost, size per step
-topsstack.py plot     ChileSenAT076.txt ion      # or unw, baselines, network  -> pic/
-topsstack.py export   ChileSenAT076.txt --dry-run   # copy products + records to hpc.exportDir
+mkdir -p /resnick/groups/simonsgroup/ykliu/chile/a120/hpc_topsStack
+cd       /resnick/groups/simonsgroup/ykliu/chile/a120/hpc_topsStack
+cp ../../a076/hpc_topsStack/ChileSenAT076.txt ChileSenAT120.txt
+mkdir -p inputs && cp ~/tools/isce-proc-v2/src/isce_proc/contrib/hpc_topsStack/inputs/ion_param.txt inputs/
+ln -s ../data SLC                                      # SLC zips go to ../data
 ```
+
+Edit `ChileSenAT120.txt`: at least `isce.boundingBox` (S, N, W, E), `isce.demFile`, the looks, and
+the workflow (`isce.workflow`; `isce.paramIonFile = ./inputs/ion_param.txt` turns the ionosphere on). The
+template name gives the orbit and direction (`...SenAT120` = ascending, relative orbit 120). New keys
+(`asf.*`, `dem.*`, `select.*`, `ion.*`, `hpc.*`, table below) are optional. Useful ones:
+
+```
+hpc.gate      = yes        # check outputs between steps and rerun bad rows (recommended)
+asf.start     = 2014-10-01
+```
+
+Check what the template resolves to:
+
+```bash
+topsstack.py show ChileSenAT120.txt
+```
+
+### 2. Find and download the SLCs
+
+```bash
+topsstack.py search   ChileSenAT120.txt              # -> ../data/search_results.csv / .kml
+topsstack.py download ChileSenAT120.txt --slurm 8    # 8 Slurm array tasks; watch: squeue -u $USER
+topsstack.py download ChileSenAT120.txt --dry-run    # after they end: should list 0 missing
+topsstack.py download ChileSenAT120.txt --verify     # CRC check of every zip (optional, slow)
+```
+
+Re-run `download --slurm 8` if some tasks ended early; it continues where it stopped.
+
+### 3. Look at the SLCs, drop the unusable ones
+
+```bash
+topsstack.py inspect ChileSenAT120.txt     # ../data/s1_version.txt, s1_slice.txt, epochs_latlon.png
+topsstack.py select  ChileSenAT120.txt     # s1_select_ion.py: unusable slices -> ../data/not_used/
+```
+
+Open `epochs_latlon.png` to check the coverage of each date before going on.
+
+### 4. DEM and water body
+
+```bash
+topsstack.py dem ChileSenAT120.txt         # only if isce.demFile does not exist yet
+```
+
+### 5. Configs and run files
+
+```bash
+topsstack.py stack ChileSenAT120.txt                    # stackSentinel.py -> configs/, run_files/
+topsstack.py stack ChileSenAT120.txt --ion-config       # ionosphere only: water body, masks, swath_align
+topsstack.py stack ChileSenAT120.txt --select-pairs 5 10   # optional: keep 5 nearest pairs + 10-date bridge
+```
+
+`--ion-config` sets the filtIon keys (water body `wbdfile`, `iteration 5`, `fill nearest`,
+`swath_align` for pairs in `pairs_diff_starting_ranges.txt`) and the burstRampIon mask, and moves the
+`mergeSwathIon.py` rows of `run_22_computeIon` behind the `computeIon.py` rows. Run it again after
+you change `ion.*` keys; it replaces keys, it does not append twice.
+
+### 6. Slurm jobs and submission
+
+```bash
+topsstack.py jobs   ChileSenAT120.txt                   # run_files/*.job, gate.job, disk_usage.job
+nohup topsstack.py submit ChileSenAT120.txt > logs/submit.out 2>&1 &   # the whole chain, in background
+```
+
+Per-step resources are in `run_files/resources.cfg` (time, CPUs, memory, `batch` = array tasks at
+once). Edit it there and re-run `jobs` before `submit`. To submit only some steps:
+`topsstack.py submit ChileSenAT120.txt -s 13 -e 16` (or `-l 13 15`).
+
+### 7. While it runs
+
+```bash
+squeue -u $USER
+topsstack.py status ChileSenAT120.txt 13-16             # bad rows per step (missing / wrong-size outputs)
+topsstack.py status ChileSenAT120.txt 15 --rerun --submit   # rerun only the bad rows, re-link the chain
+```
+
+With `hpc.gate = yes` you get no mail per step. The gate reruns bad rows itself (up to
+`hpc.gateRetries`), then either lets the next step start or stops the chain and mails you the bad
+rows with their log lines. At the end you get one mail with the summary of all steps.
+
+### 8. Free disk space (optional, any time)
+
+```bash
+topsstack.py clean ChileSenAT120.txt                    # table: what may be deleted after which step
+topsstack.py clean ChileSenAT120.txt esd coreg_overlap  # dry run: files and sizes
+topsstack.py clean ChileSenAT120.txt esd coreg_overlap --delete --reuse
+```
+
+`--delete` refuses a file type while its last reader (the kill-after step) still has bad or
+unfinished rows. The SLC zips are read until step 17 with ionosphere (step 13 without).
+
+### 9. After the last step
+
+```bash
+topsstack.py report ChileSenAT120.txt                   # time, CPU, memory, cost, size per step
+topsstack.py plot   ChileSenAT120.txt ion               # also: unw, baselines, network -> pic/
+topsstack.py export ChileSenAT120.txt --dry-run         # then without --dry-run (needs hpc.exportDir)
+```
+
+Always look at the ionosphere figures before MintPy.
 
 ## The template
 
-`isce.*` keys go to `stackSentinel.py` through `run_isce_stack.py` (see `topsstack.py -h` and
+`isce.*` keys go to `stackSentinel.py` through `run_isce_stack.py` (see `run_isce_stack.py -h` and
 `utils/config.py` for all keys and defaults). The others are read by `topsstack.py` only:
 
 | group | keys (all optional) | derived when `auto` |
@@ -54,11 +145,8 @@ topsstack.py export   ChileSenAT076.txt --dry-run   # copy products + records to
 | `asf.*` | `dataDir wkt bbox relativeOrbit flightDirection platforms start end processes shards` | orbit and direction from the name (`...SenAT076`), AOI from `isce.boundingBox`, data in `../data` |
 | `dem.*` | `dir snwe buffer waterBody` | integer box = bounding box + 1° |
 | `select.*` | `southNorth minAcq numConnections bridge` | S/N from the bounding box |
-| `ion.*` | `wbdFile maskFile iteration fill swathAlign burstRampMask` | water body next to `isce.demFile`, same box |
-| `hpc.*` | `track account mail ompTopo clean gate gateRetries exportDir costPerCpuHour` | `a076`, `simonsgroup`, `$USER@caltech.edu` |
-
-Per-step Slurm resources are in `run_files/resources.cfg` (copied from `inputs/` on the first `jobs`;
-edit it there). `batch` is the number of array tasks running at once.
+| `ion.*` | `wbdFile maskFile iteration fill swathAlign burstRampMask` | water body next to `isce.demFile`, same box; 5 iterations; fill nearest |
+| `hpc.*` | `track account mail ompTopo clean gate gateRetries gpuType exportDir costPerCpuHour` | `a076`, `simonsgroup`, `$USER@caltech.edu`, gate off, 2 retries, v100 |
 
 ## How the chain is protected
 
@@ -68,11 +156,10 @@ edit it there). `batch` is the number of array tasks running at once.
   `.xml`. A missing binary whose `.xml` is still there is reported as `cleaned`, not failed.
 - **Gate (`hpc.gate = yes`):** after each step, a small job runs `status --gate`: it reruns bad rows up
   to `hpc.gateRetries` times and lets the next step start only when every row is good (else the chain
-  stops and you get a FAIL mail). Parts of a step then chain with `afterany`.
+  stops and you get a mail). Parts of a step then chain with `afterany`.
 - **`clean --delete`** deletes a file type only if its last reader (the kill-after step in the
   `clean` table) has all its outputs. The table is derived from the stack: bursts read from the SLC zips
-  through VRTs (always, in topsStack), `virtual_merge`, and whether ionosphere steps exist. For example,
-  the zips are needed until `subband_and_resamp` (step 17) with ionosphere, else until step 13.
+  through VRTs (always, in topsStack), `virtual_merge`, and whether ionosphere steps exist.
 - **Disk use** is recorded after each step by `disk_usage.job`, outside the chain.
 - `hpc.clean = yes` activates the deletion lines written into the job files (commented otherwise).
 
@@ -81,24 +168,24 @@ edit it there). `batch` is the number of array tasks running at once.
 - Steps 17–24 estimate the smooth ionospheric phase from range sub-bands
   ([Liang et al., 2019](https://ieeexplore.ieee.org/document/8706258); ISCE2 PR #326). Step 17 re-reads
   the raw secondary bursts from the zips, so keep them until it has finished.
+- Step 23 (`filtIon.py`) masks before filtering: valid pixels, coherence > 0.75 (`cor_cutoff`, never
+  lower), height < 5000 m, the common largest connected component of the two sub-band unwrappings,
+  plus the water body (`wbdfile`) and your own mask (`maskfile`) only if they are set in the config
+  (`stack --ion-config` does this). It then keeps the largest connected region.
 - Steps 25–28 estimate the azimuth phase ramp per burst caused by the ionospheric azimuth shift
   (PR #600). They need ESD applied during coregistration: step 27 subtracts the ESD-type part of the
   swath-mean shift, which ESD has already corrected. They do not read the ESD files themselves.
-- `stack --ion-config` sets the filtIon keys and moves the `mergeSwathIon.py` rows of
-  `run_22_computeIon` behind the `computeIon.py` rows; `jobs` gives them their own job part, so each
-  merge runs after the sub-swath results of its pair exist.
-- Mask unwrapping errors before filtering (step 23): set `ion.maskFile` (e.g. from `otsu_masking.py`),
-  re-run `stack --ion-config`, then re-run from step 22. Always look at the ionosphere products
-  (`plot ... ion`); they need checking.
+- Mask unwrapping errors before filtering: set `ion.maskFile` (e.g. from `otsu_masking.py`),
+  re-run `stack --ion-config`, then re-run from step 23.
 
 ## Notes
 
 - `submit` calls `sbatch` two or three times per step (step, gate, disk usage); on a busy controller
-  that can take ~30 s per call, so run it in the background (`nohup topsstack.py submit ... &`).
+  that can take ~30 s per call, hence `nohup ... &`.
 - GPU steps request `--gres=gpu:<hpc.gpuType>:<n>` (Slurm here rejects a count without a type);
   with `isce.useGPU = no` no GPU is requested at all.
 - `run_01_unpack_topo_reference` runs a Python pool of `Ncpus_per_task / hpc.ompTopo` processes
   (one per burst is fastest), each with `hpc.ompTopo` OpenMP threads, on one node (≤ 56 CPUs here).
-- Using this version: `export ISCE_PROC_HOME=~/tools/isce-proc-v2` before loading the environment
-  (`~/tools/conda-envs/isce2/config.rc`). The previous scripts are in `scripts/obsolete/`, with the old
-  README (`README_v1.md`).
+- A low fairshare (after heavy use) can leave only a few array tasks running at once; that is the
+  queue, not an error (`squeue` reason `Priority`).
+- The previous scripts are in `scripts/obsolete/`, with the old README (`README_v1.md`).
