@@ -279,7 +279,7 @@ def write_job_scripts(inps):
         with open('gate.job', 'w') as outf:
             outf.write(GATE_JOB.format(groupname=inps.account, track=inps.track_no, mail=inps.mail,
                                        retries=inps.gate, python=sys.executable, template=inps.track_template or '',
-                                       topsstack=SCRIPT_DIR.parents[2] / 'topsstack.py'))
+                                       topsstack=SCRIPT_DIR.parent / 'topsstack.py'))
         print(f' gate.job (reruns per step: {inps.gate})')
     elif os.path.exists('gate.job'):
         os.remove('gate.job')                            # gate off: plain afterok chain
@@ -293,7 +293,7 @@ def write_job_scripts(inps):
 
 def write_end_cmd(template=None, cmd_script='run_atTheEnd.sh'):
     """Create a final bash cmd for resource/timing reporting (moves no files: status/clean/report read them here)."""
-    topsstack = SCRIPT_DIR.parents[2] / 'topsstack.py'
+    topsstack = SCRIPT_DIR.parent / 'topsstack.py'
     with open(cmd_script, 'w') as outf:
         outf.write('#!/bin/bash\n')
         outf.write('# Commands after topsStack processing. Run this after all the jobs are finished\n\n')

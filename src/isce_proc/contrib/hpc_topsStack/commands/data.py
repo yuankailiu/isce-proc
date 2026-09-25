@@ -1,6 +1,6 @@
 """Data side of topsstack.py: search, download, inspect, select, dem.
 
-All settings come from the track template (asf.*, dem.*, select.*; see isce_proc/hpc/config.py).
+All settings come from the track template (asf.*, dem.*, select.*; see commands/config.py).
 Outputs go to the data directory (asf.dataDir, default ../data next to the stack), which the
 stack's SLC/ links to.
 """
@@ -16,10 +16,10 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
-PKG = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))          # src/isce_proc
-SCRIPTS = os.path.join(PKG, 'contrib', 'hpc_topsStack', 'scripts')
-HPC_DIR = os.path.dirname(SCRIPTS)
-TOPSSTACK = os.path.join(PKG, 'topsstack.py')
+HPC_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))      # contrib/hpc_topsStack
+PKG = os.path.dirname(os.path.dirname(HPC_DIR))                             # src/isce_proc
+SCRIPTS = os.path.join(HPC_DIR, 'scripts')
+TOPSSTACK = os.path.join(HPC_DIR, 'topsstack.py')
 
 
 def _log(c, name):

@@ -11,7 +11,7 @@ import subprocess
 from collections import defaultdict
 from datetime import datetime
 
-from isce_proc.hpc.data import _log
+from commands.data import _log
 
 
 def _bytes(x):

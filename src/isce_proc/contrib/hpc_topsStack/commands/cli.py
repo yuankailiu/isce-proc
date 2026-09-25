@@ -10,9 +10,9 @@ import sys
 from contextlib import contextmanager
 from pathlib import Path
 
-from isce_proc.hpc import config, data, export, plot, report, stack
+from commands import config, data, export, plot, report, stack
 
-SCRIPTS = Path(__file__).resolve().parents[1] / 'contrib' / 'hpc_topsStack' / 'scripts'
+SCRIPTS = Path(__file__).resolve().parents[1] / 'scripts'
 
 EXAMPLE = """examples (from the stack directory, e.g. chile/a076/hpc_topsStack):
   topsstack.py search   ChileSenAT076.txt                # ASF search -> data/search_results.*

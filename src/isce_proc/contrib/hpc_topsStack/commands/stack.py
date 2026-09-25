@@ -10,7 +10,7 @@ import shutil
 import subprocess
 import sys
 
-from isce_proc.hpc.data import PKG, _log, _run
+from commands.data import PKG, _log, _run
 
 # interferogram steps whose rows are thinned by --select-pairs: step name -> config prefix
 PAIR_STEPS = {'generate_burst_igram': 'config_generate_igram_', 'merge_burst_igram': 'config_merge_igram_',

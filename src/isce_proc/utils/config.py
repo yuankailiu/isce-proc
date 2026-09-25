@@ -137,7 +137,7 @@ AUTO_DICT = {
     'isce.maxPerpBaseline'    : '1800',
     'isce.applyWaterMask'     : True,
 
-    # topsstack.py (HPC workflow); None/'' = derived at run time, see hpc/config.py
+    # topsstack.py (HPC workflow); None/'' = derived at run time, see contrib/hpc_topsStack/commands/config.py
     'asf.dataDir'             : '../data',
     'asf.bbox'                : None,
     'asf.wkt'                 : None,

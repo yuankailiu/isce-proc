@@ -9,7 +9,7 @@ import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
 
-from isce_proc.hpc.data import _log
+from commands.data import _log
 
 # (source glob relative to the stack dir, extra rsync options)
 ITEMS = [

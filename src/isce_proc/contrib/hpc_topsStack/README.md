@@ -10,6 +10,21 @@ its commands to `logs/<subcommand>_<date>.log`, and is safe to re-run.
 Requires ISCE2 with topsStack (`stackSentinel.py -h`), MintPy, `asf_search`, and an Earthdata entry in
 `~/.netrc`. Optional: `reportseff`.
 
+Everything of this workflow is in this directory:
+
+```
+hpc_topsStack/
+├── topsstack.py     the one command (put this directory on PATH)
+├── commands/        code of the subcommands: cli, config, data, stack, report, export, plot
+├── scripts/         tools the subcommands run, also copied into <stack>/run_files/:
+│                    write_slurmJobs.py, submit_chained_dependencies.sh, check_topsStack.py,
+│                    clean_topsStack.py, s1_version.py, plot_imgs.py, ...
+├── inputs/          defaults: resources.cfg, slurm.job, ion_param.txt, example template
+└── download_dem.sh
+```
+
+It uses `run_isce_stack.py` and `utils/` of `src/isce_proc/` (shared with the rest of isce-proc).
+
 ## Step by step: a new track
 
 Example: Chile, ascending track 120, stack in `chile/a120/hpc_topsStack`. Replace the names with yours.
@@ -18,8 +33,8 @@ Example: Chile, ascending track 120, stack in `chile/a120/hpc_topsStack`. Replac
 
 ```bash
 source ~/tools/conda-envs/isce2/config.rc              # the usual environment
-export PATH=~/tools/isce-proc-v2/src/isce_proc:$PATH   # put topsstack.py (branch workflow-v2) first
-which topsstack.py                                     # -> ~/tools/isce-proc-v2/src/isce_proc/topsstack.py
+export PATH=~/tools/isce-proc-v2/src/isce_proc/contrib/hpc_topsStack:$PATH   # topsstack.py (branch workflow-v2) first
+which topsstack.py   # -> ~/tools/isce-proc-v2/src/isce_proc/contrib/hpc_topsStack/topsstack.py
 ```
 
 `topsstack.py` always uses the `isce_proc` code next to it, also in the scripts it starts, so the

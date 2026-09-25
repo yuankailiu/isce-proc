@@ -9,7 +9,7 @@ import glob
 import os
 import sys
 
-from isce_proc.hpc.data import SCRIPTS, _log, _run
+from commands.data import SCRIPTS, _log, _run
 
 # plot_imgs.py calls: (input glob, --loc, --band, output name, extra args)
 IMGS = {
