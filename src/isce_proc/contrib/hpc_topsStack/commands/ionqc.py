@@ -10,7 +10,8 @@ Without that file (no wbdfile in the filtIon config): raw_no_projection.cor > 0.
 closure (after step 23, default) for every triangle of pairs (a,b), (b,c), (a,c):
             e = I(a,b) + I(b,c) - I(a,c)          (0 if consistent; a constant is removed)
         on filt.ion. A pair's score is the median RMS of e over its triangles, attributed greedily
-        (worst pair first; its triangles are then ignored when scoring the others).
+        (worst pair first; its triangles are then ignored when scoring the others). A flagged pair
+        with no triangle free of other flagged pairs is 'ambiguous' ('closure x?').
 --unw   (after step 23) semivariogram gamma(r) = 0.5 E[(phi(x+r) - phi(x))^2] of the interferogram
         (merged/interferograms/<pair>/filt_fine.unw, pixels with filt_fine.cor > 0.5 in the mask)
         at r = 10, 25, 50, 100, 200 km (about log-spaced), ratio (unw - ion) / unw; the decision uses
@@ -18,7 +19,8 @@ closure (after step 23, default) for every triangle of pairs (a,b), (b,c), (a,c)
         > 1: the correction adds variance.
 
 Exclude a pair when closure or --raw flags it and the correction does not help (ratio >= 1 or not
-tested), and only if the network stays connected without it (union-find over the dates, worst pair
+tested), or closure is ambiguous and --raw or --unw (ratio > --ratio) also flags it, or the
+correction alone makes the interferogram much worse (ratio > 5); and only if the network stays connected without it (union-find over the dates, worst pair
 first). Other flags are listed to check by eye. All pairs and statistics go to
 logs/ionqc_<date>.csv, the summary to logs/ionqc_<date>.txt. --apply adds the excluded pairs to
 --exc_pair of run_24_invertIon and run_26_invertIonShift, keeping pairs already listed there.
@@ -139,8 +141,17 @@ def attribute(pairs, tri_rms, floor, nmad):
         s = scores(set(flagged))
         cand = [(x, p) for p, (x, _) in s.items() if p not in flagged and np.isfinite(x) and x > thr]
         if not cand:
-            return s, flagged, (med, mad, thr)
+            break
         flagged.append(max(cand)[1])
+    # re-check: a flagged pair is confirmed only by a triangle without the other flagged pairs.
+    # With none left (e.g. it shares its only triangle with a bad pair) closure cannot tell: ambiguous.
+    s = scores(set(flagged))
+    confirmed = [p for p in flagged if np.isfinite(s[p][0]) and s[p][0] > thr]
+    ambiguous = [p for p in flagged if not np.isfinite(s[p][0])]
+    s0 = scores(set())
+    for p in ambiguous:
+        s[p] = (s0[p][0], s0[p][1])                           # report the raw median
+    return s, confirmed, ambiguous, (med, mad, thr)
 
 
 # ---------------------------------------------------------------- correction test
@@ -226,7 +237,7 @@ def apply_exc(c, exc):
 
 # ---------------------------------------------------------------- driver
 def ionqc(c, raw=False, closure_test=True, unw=False, apply=False, nproc=8, step=2,
-          floor=3.0, nmad=6.0, ratio_max=1.5, raw_floor=50.0, raw_nmad=10.0,
+          floor=3.0, nmad=6.0, ratio_max=1.5, ratio_excl=5.0, raw_floor=50.0, raw_nmad=10.0,
           dists=(10, 25, 50, 100, 200), dist_test=100, sample=0):
     name = 'filt.ion' if closure_test or unw else 'raw_no_projection.ion'
     files = sorted(glob.glob(os.path.join(c.stack, 'ion', '*_*', 'ion_cal', name)))
@@ -245,21 +256,21 @@ def ionqc(c, raw=False, closure_test=True, unw=False, apply=False, nproc=8, step
         stats.append(f'raw spread p99.5-p0.5: median {rmed:.1f} rad, MAD {rmad:.1f}, threshold {rthr:.1f} '
                      f'(max({raw_floor}, median + {raw_nmad} MAD)); {len(raw_bad)} flagged')
 
-    clo, clo_bad, ntri = {p: (np.nan, 0) for p in pairs}, [], 0
+    clo, clo_bad, clo_amb, ntri = {p: (np.nan, 0) for p in pairs}, [], [], 0
     if closure_test:
         print(f'closure of {len(pairs)} filt.ion (every {step}. pixel, masked) ...', flush=True)
         with ThreadPoolExecutor(nproc) as ex:
             ion = dict(zip(pairs, ex.map(lambda p: _ion(c, p, step=step), pairs)))
         tri_rms = closure(ion, nproc)
         ntri = len(tri_rms)
-        clo, clo_bad, (med, mad, thr) = attribute(pairs, tri_rms, floor, nmad)
+        clo, clo_bad, clo_amb, (med, mad, thr) = attribute(pairs, tri_rms, floor, nmad)
         stats.append(f'closure RMS over {ntri} triangles: median {med:.2f} rad, MAD {mad:.2f}, threshold {thr:.2f} '
-                     f'(max({floor}, median + {nmad} MAD)); {len(clo_bad)} flagged')
+                     f'(max({floor}, median + {nmad} MAD)); {len(clo_bad)} flagged, {len(clo_amb)} ambiguous (no independent triangle)')
 
     cr = {}
     if unw:
         shape = _band(os.path.join(c.stack, 'ion', pairs[0], 'ion_cal', 'filt.ion'), 2, 2).shape
-        flag = sorted(set(clo_bad) | set(raw_bad))
+        flag = sorted(set(clo_bad) | set(clo_amb) | set(raw_bad))
         rng = np.random.default_rng(0)
         sub = pairs if not sample or sample >= len(pairs) else sorted(set(flag) | set(rng.choice(pairs, sample, replace=False)))
         print(f'correction test on the interferograms of {len(sub)} pairs ...', flush=True)
@@ -274,10 +285,13 @@ def ionqc(c, raw=False, closure_test=True, unw=False, apply=False, nproc=8, step
         r = cr.get(p)
         r50 = r[dists.index(dist_test)] if r else np.nan
         helps = np.isfinite(r50) and r50 < 1.0
-        why = ([f'raw {rs[p]:.0f}'] if p in raw_bad else []) + ([f'closure {s_:.1f}'] if p in clo_bad else [])
-        if np.isfinite(r50) and r50 > ratio_max:
+        worse = np.isfinite(r50) and r50 > ratio_max
+        why = (([f'raw {rs[p]:.0f}'] if p in raw_bad else []) + ([f'closure {s_:.1f}'] if p in clo_bad else [])
+               + ([f'closure {s_:.1f}?'] if p in clo_amb else []))
+        if worse:
             why.append(f'var ratio {r50:.2f}')
-        if (p in raw_bad or p in clo_bad) and not helps:
+        if (((p in raw_bad or p in clo_bad) and not helps) or (p in clo_amb and (p in raw_bad or worse))
+                or (np.isfinite(r50) and r50 > ratio_excl)):
             bad.append(p)
             why.append('-> exclude')
         elif why:
