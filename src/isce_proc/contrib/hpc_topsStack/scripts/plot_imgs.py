@@ -52,7 +52,9 @@ def cmdLineParse():
     parser.add_argument("-t", "--txt", dest="date_txt", default=None,
                         help="Text file listing dates/pairs to highlight")
     parser.add_argument("-c", "--collage", dest="collage", action="store_true", default=True,
-                        help="Collage .tifs into SVG/HTML (default: %(default)s)")
+                        help="Collage the images into collage.html (default: %(default)s)")
+    parser.add_argument("--svg", dest="svg", action="store_true",
+                        help="Also write collage.svg (links the .tif files)")
     if len(sys.argv) <= 1:
         parser.print_help(); sys.exit(1)
     return parser.parse_args()
@@ -89,8 +91,9 @@ if __name__ == "__main__":
     ipl, ppc, WIDTH = 20, 30, 30  # imgs/row, px/cm, artboard width
     n_rows = np.ceil(len(files) / ipl)
     ratio = min(1.0, WIDTH * ppc / (ipl * width))  # scaling factor
-    LENGTH = (length * ratio * n_rows) / ppc
+    HEAD = 1.0  # cm on top for the title and the colorbar
     rW, rL = width * ratio / ppc, length * ratio / ppc
+    LENGTH = HEAD + rL * (0.82 * (n_rows - 1) + 1.125) + 0.2   # last row starts at 0.82 rL (n-1) + rL/8
 
     print(f"Total files: {len(files)} | {ipl} per row | ~{n_rows:.0f} rows")
     print(f"Image size: {width}x{length}px | Collage board: {WIDTH}x{LENGTH:.1f}cm")
@@ -145,50 +148,52 @@ if __name__ == "__main__":
             ii = int((i + 1 - 0.1) / ipl) + 1
             jj = i + 1 - (ii - 1) * ipl
             x0 = rW * 0.85 * (jj - 1) + rW / 5
-            y0 = rL * 0.82 * (ii - 1) + rL / 8
+            y0 = rL * 0.82 * (ii - 1) + rL / 8 + HEAD
             font_color, add_box = "", ""
             if mdate and sdate:
                 if any(x in marks for x in [f"{mdate}_{sdate}", f"{sdate}_{mdate}", f"{mdate}-{sdate}", f"{sdate}-{mdate}"]):
                     font_color = ";fill:red"
                     add_box = f'<rect fill="none" stroke="red" stroke-width="2" x="{x0}cm" y="{y0}cm" width="{rW}cm" height="{rL}cm"/>'
-                img_svg = f'''<image xlink:href="{pair}.tif" x="{x0}cm" y="{y0}cm"/>
+                img_svg = f'''<image xlink:href="{pair}.tif" x="{x0}cm" y="{y0}cm" width="{rW}cm" height="{rL}cm"/>
                     {add_box}
                     <text x="{x0}cm" y="{y0+rW*0.1}cm" style="font-family:Times;font-size:8px{font_color};">
                     <tspan x="{x0}cm" dy="0">{mdate}_</tspan><tspan x="{x0}cm" dy="1em">{sdate}</tspan></text>'''
             else:
                 if date in marks: font_color = ";fill:red"
-                img_svg = f'''<image xlink:href="{pair}.tif" x="{x0}cm" y="{y0}cm"/>
+                img_svg = f'''<image xlink:href="{pair}.tif" x="{x0}cm" y="{y0}cm" width="{rW}cm" height="{rL}cm"/>
                     <text x="{x0}cm" y="{y0+rW*0.1}cm" style="font-family:Times;font-size:8px{font_color};">{date}</text>'''
             svg += img_svg
-
-    svg += "</svg>"
-    with open(os.path.join(odir, "collage.svg"), "w") as f: f.write(svg)
 
     # cleanup tmp RAM files
     for t in tmp_files:
         try: os.remove(t)
         except: pass
 
-    # colorbar
+    # colorbar, top right of the collage
     cb_w, cb_l = 100, 20
     cb = np.ones((cb_l, cb_w), np.float32) * np.linspace(-inps.wrap/2, inps.wrap/2, cb_w, dtype=np.float32)[None,:]
     cb.astype(np.float32).tofile(os.path.join(odir, "colorbar"))
     runCmd(f"mdx {os.path.join(odir,'colorbar')} -s {cb_w} -cmap cmy -wrap {inps.wrap} -addr -{inps.wrap/2} -P -workdir {wdir}")
     ppm = os.path.join(wdir, "out.ppm")
-    tif = os.path.join(odir, f"colorbar_-{inps.wrap/2}_{inps.wrap/2}.tiff")
-    runCmd(f"convert {ppm} -compress LZW {tif}")
+    cbar = f"colorbar_-{inps.wrap/2:g}_{inps.wrap/2:g}.tif"
+    runCmd(f"convert {ppm} -compress LZW {os.path.join(odir, cbar)}")
     runCmd(f"rm {os.path.join(odir,'colorbar')} {ppm}")
     os.rmdir(wdir)
+    cbx, cbw = WIDTH - 5.0, 4.0
+    svg += f'''<text x="0.3cm" y="0.6cm" style="font-family:Times;font-size:12px;">{inps.input}  ({len(files)} images; red: listed in {inps.date_txt})</text>
+        <image xlink:href="{cbar}" x="{cbx}cm" y="0.2cm" width="{cbw}cm" height="0.4cm" preserveAspectRatio="none"/>
+        <text x="{cbx}cm" y="0.9cm" style="font-family:Times;font-size:10px;" text-anchor="middle">{-inps.wrap/2:g}</text>
+        <text x="{cbx+cbw/2}cm" y="0.9cm" style="font-family:Times;font-size:10px;" text-anchor="middle">0</text>
+        <text x="{cbx+cbw}cm" y="0.9cm" style="font-family:Times;font-size:10px;" text-anchor="middle">{inps.wrap/2:g} (wrapped)</text>'''
+    svg += "</svg>"
+    if inps.svg:
+        with open(os.path.join(odir, "collage.svg"), "w") as f: f.write(svg)
 
-    # HTML
+    # HTML: the same layout with PNGs (browsers do not show TIFF)
     html_file = os.path.join(odir, "collage.html")
     runCmd(f"mogrify -format png {odir}/*.tif")
-    runCmd(f"cp {os.path.join(odir,'collage.svg')} {html_file}")
-    with open(html_file, "r+") as f:
-        content = f.read()
-        f.seek(0)
-        f.write("<!DOCTYPE html><html><head><meta charset='utf-8'><title>Collage</title></head><body style='margin:0;'>\n" + content)
-    with open(html_file, "a") as f: f.write("</body></html>\n")
-    runCmd(f"sed -i 's/\\.tif/\\.png/g' {html_file}")
+    with open(html_file, "w") as f:
+        f.write("<!DOCTYPE html><html><head><meta charset='utf-8'><title>Collage</title></head><body style='margin:0;'>\n"
+                + svg.replace('.tif"', '.png"') + "\n</body></html>\n")
 
     print(f"Done. HTML preview: {html_file}")
