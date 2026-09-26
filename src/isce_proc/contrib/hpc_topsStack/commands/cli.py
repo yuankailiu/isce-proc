@@ -151,16 +151,23 @@ def cmd_export(c, extra):
 
 
 def cmd_ionqc(c, extra):
-    ap = argparse.ArgumentParser(prog='topsstack.py ionqc TEMPLATE')
-    ap.add_argument('--unw', action='store_true', help='also test the correction on the interferograms (slower)')
+    ap = argparse.ArgumentParser(prog='topsstack.py ionqc TEMPLATE',
+                                 description='closure test by default (after step 23); see commands/ionqc.py')
+    ap.add_argument('--raw', action='store_true', help='also the raw-ionosphere spread test (possible after step 22)')
+    ap.add_argument('--raw-only', action='store_true', help='only the raw test (after step 22, before 23)')
+    ap.add_argument('--unw', action='store_true', help='also the correction test on the interferograms')
     ap.add_argument('--sample', type=int, default=0, help='--unw only on the flagged pairs + this many random ones; 0: all pairs (default)')
-    ap.add_argument('--apply', action='store_true', help='write the suggested --exc_pair into run_24/run_26')
+    ap.add_argument('--apply', action='store_true', help='add the excluded pairs to --exc_pair of run_24/run_26')
     ap.add_argument('-n', '--nproc', type=int, default=8)
     ap.add_argument('--floor', type=float, default=3.0, help='minimum closure threshold [rad] (default: %(default)s)')
     ap.add_argument('--nmad', type=float, default=6.0, help='closure threshold = median + NMAD * MAD (default: %(default)s)')
-    ap.add_argument('--ratio', type=float, default=1.2, help='max variance ratio after/before at 50 km (default: %(default)s)')
+    ap.add_argument('--raw-floor', type=float, default=50.0, help='minimum raw-spread threshold [rad] (default: %(default)s)')
+    ap.add_argument('--raw-nmad', type=float, default=10.0, help='raw threshold = median + N * MAD (default: %(default)s)')
+    ap.add_argument('--ratio', type=float, default=1.2, help='variance ratio at 50 km to list for checking (default: %(default)s)')
     a = ap.parse_args(extra)
-    return ionqc.ionqc(c, unw=a.unw, apply=a.apply, nproc=a.nproc, floor=a.floor, nmad=a.nmad, ratio_max=a.ratio, sample=a.sample)
+    return ionqc.ionqc(c, raw=a.raw or a.raw_only, closure_test=not a.raw_only, unw=a.unw and not a.raw_only,
+                       apply=a.apply, nproc=a.nproc, floor=a.floor, nmad=a.nmad, ratio_max=a.ratio,
+                       raw_floor=a.raw_floor, raw_nmad=a.raw_nmad, sample=a.sample)
 
 
 def cmd_plot(c, extra):
