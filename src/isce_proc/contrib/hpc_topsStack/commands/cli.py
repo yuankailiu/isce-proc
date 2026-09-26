@@ -144,8 +144,9 @@ def cmd_report(c, extra):
 
 def cmd_export(c, extra):
     ap = argparse.ArgumentParser(prog='topsstack.py export TEMPLATE')
-    ap.add_argument('--dry-run', action='store_true')
-    ap.add_argument('-n', '--nproc', type=int, default=4)
+    ap.add_argument('--dry-run', action='store_true', help='only list what would be copied, with sizes')
+    ap.add_argument('-n', '--nproc', type=int, default=8,
+                    help='parallel rsync jobs; the interferograms are split over them (default: %(default)s)')
     a = ap.parse_args(extra)
     return export.export(c, dry_run=a.dry_run, nproc=a.nproc)
 

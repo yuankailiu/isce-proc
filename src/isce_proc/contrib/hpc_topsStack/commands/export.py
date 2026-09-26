@@ -15,7 +15,7 @@ from commands.data import _log
 ITEMS = [
     ('reference/IW*.xml', []),                       # stack metadata
     ('baselines', []),
-    ('merged/interferograms', []),
+    ('merged/interferograms/*', []),                  # one directory per pair: split into nproc rsync jobs
     ('ion/*/ion_cal', []),
     ('ion_dates', []),
     ('ion_azshift_dates', []),
@@ -40,7 +40,10 @@ def export(c, dry_run=False, nproc=4):
         srcs = sorted(glob.glob(os.path.join(c.stack, pattern)))
         if srcs:
             rel = [os.path.relpath(s, c.stack) for s in srcs]
-            jobs.append((pattern, ['rsync', '-aR', *(['-n'] if dry_run else []), '--stats', *opts, *rel, target + '/']))
+            parts = [rel[i::nproc] for i in range(nproc)] if len(rel) > 50 else [rel]   # big lists in parallel
+            for i, part in enumerate(p for p in parts if p):
+                name = pattern if len(parts) == 1 else f'{pattern} [{i + 1}/{len(parts)}]'
+                jobs.append((name, ['rsync', '-aR', *(['-n'] if dry_run else []), '--stats', *opts, *part, target + '/']))
     geom = os.path.join(c.stack, 'merged', 'geom_reference')      # -> geom_reference/ on top (as on marmot)
     if os.path.isdir(geom):
         jobs.append(('geom_reference', ['rsync', '-a', *(['-n'] if dry_run else []), '--stats', '--exclude', '*.full*',
