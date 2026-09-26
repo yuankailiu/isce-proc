@@ -97,20 +97,20 @@ topsstack.py dem ChileSenAT120.txt         # only if isce.demFile does not exist
 
 ```bash
 topsstack.py stack ChileSenAT120.txt                    # stackSentinel.py -> configs/, run_files/
-topsstack.py stack ChileSenAT120.txt --ion-config       # ionosphere only: water body, masks, swath_align
+topsstack.py stack ChileSenAT120.txt --ion-config       # ionosphere only: water body, masks
 topsstack.py stack ChileSenAT120.txt --select-pairs 5 10   # optional: keep 5 nearest pairs + 10-date bridge
 ```
 
-`--ion-config` sets the filtIon keys (water body `wbdfile`, `iteration 5`, `fill nearest`,
-`swath_align` for pairs in `pairs_diff_starting_ranges.txt`) and the burstRampIon mask, and moves the
-`mergeSwathIon.py` rows of `run_22_computeIon` behind the `computeIon.py` rows. Run it again after
-you change `ion.*` keys; it replaces keys, it does not append twice.
+`--ion-config` sets the filtIon keys (`wbdfile`, `iteration 5`, `fill nearest`; `swath_align` only if
+`ion.swathAlign = yes`), the burstRampIon mask, and puts the `mergeSwathIon.py` rows of step 22 last.
+Safe to re-run.
 
 ### 6. Slurm jobs and submission
 
 ```bash
 topsstack.py jobs   ChileSenAT120.txt                   # run_files/*.job, gate.job, disk_usage.job
-nohup topsstack.py submit ChileSenAT120.txt > logs/submit.out 2>&1 &   # the whole chain, in background
+nohup topsstack.py submit ChileSenAT120.txt -e 23 > logs/submit.out 2>&1 &   # with ionosphere: stop before 24
+nohup topsstack.py submit ChileSenAT120.txt > logs/submit.out 2>&1 &         # without: the whole chain
 ```
 
 Per-step resources are in `run_files/resources.cfg` (time, CPUs, memory, `batch` = array tasks at
@@ -129,6 +129,19 @@ With `hpc.gate = yes` you get no mail per step. The gate reruns bad rows itself 
 `hpc.gateRetries`), then either lets the next step start or stops the chain and mails you the bad
 rows with their log lines. At the end you get one mail with the summary of all steps.
 
+### 7b. Ionosphere check, then steps 24-28 (ionosphere only)
+
+```bash
+topsstack.py ionqc ChileSenAT120.txt --raw --unw        # ~1 min; logs/ionqc_<date>.txt/.csv
+topsstack.py plot  ChileSenAT120.txt ion                # pic/img_ion_amp/collage.html (red: diff. starting ranges)
+topsstack.py ionqc ChileSenAT120.txt --raw --unw --apply   # add the bad pairs to --exc_pair of steps 24/26
+topsstack.py submit ChileSenAT120.txt -s 24
+```
+
+`ionqc` excludes a pair when its raw ionosphere has blocks (unwrapping errors) or it fails loop
+closure, and the correction does not help its interferogram; the network stays connected. Pairs
+to look at are listed as "check by eye". Details: `commands/ionqc.py`.
+
 ### 8. Free disk space (optional, any time)
 
 ```bash
@@ -144,11 +157,11 @@ unfinished rows. The SLC zips are read until step 17 with ionosphere (step 13 wi
 
 ```bash
 topsstack.py report ChileSenAT120.txt                   # time, CPU, memory, cost, size per step
-topsstack.py plot   ChileSenAT120.txt ion               # also: unw, baselines, network -> pic/
+topsstack.py plot   ChileSenAT120.txt ion               # ion pairs + dates; also: unw, baselines, network
 topsstack.py export ChileSenAT120.txt --dry-run         # then without --dry-run (needs hpc.exportDir)
 ```
 
-Always look at the ionosphere figures before MintPy.
+Look at `pic/*/collage.html` (ionosphere per pair and per date) before MintPy.
 
 ## The template
 
@@ -160,7 +173,7 @@ Always look at the ionosphere figures before MintPy.
 | `asf.*` | `dataDir wkt bbox relativeOrbit flightDirection platforms start end processes shards` | orbit and direction from the name (`...SenAT076`), AOI from `isce.boundingBox`, data in `../data` |
 | `dem.*` | `dir snwe buffer waterBody` | integer box = bounding box + 1° |
 | `select.*` | `southNorth minAcq numConnections bridge` | S/N from the bounding box |
-| `ion.*` | `wbdFile maskFile iteration fill swathAlign burstRampMask` | water body next to `isce.demFile`, same box; 5 iterations; fill nearest |
+| `ion.*` | `wbdFile maskFile iteration fill swathAlign burstRampMask` | water body next to `isce.demFile`, same box; 5 iterations; fill nearest; no swath_align |
 | `hpc.*` | `track account mail ompTopo clean gate gateRetries gpuType exportDir costPerCpuHour` | `a076`, `simonsgroup`, `$USER@caltech.edu`, gate off, 2 retries, v100 |
 
 ## How the chain is protected
@@ -180,26 +193,17 @@ Always look at the ionosphere figures before MintPy.
 
 ## Ionosphere (steps 17–28)
 
-- Steps 17–24 estimate the smooth ionospheric phase from range sub-bands
-  ([Liang et al., 2019](https://ieeexplore.ieee.org/document/8706258); ISCE2 PR #326). Step 17 re-reads
-  the raw secondary bursts from the zips, so keep them until it has finished.
-- Step 23 (`filtIon.py`) masks before filtering: valid pixels, coherence > 0.75 (`cor_cutoff`, never
-  lower), height < 5000 m, the common largest connected component of the two sub-band unwrappings,
-  plus the water body (`wbdfile`) and your own mask (`maskfile`) only if they are set in the config
-  (`stack --ion-config` does this). It then keeps the largest connected region.
-- Steps 25–28 estimate the azimuth phase ramp per burst caused by the ionospheric azimuth shift
-  (PR #600). They need ESD applied during coregistration: step 27 subtracts the ESD-type part of the
-  swath-mean shift, which ESD has already corrected. They do not read the ESD files themselves.
-- Before step 24: `topsstack.py ionqc TEMPLATE --raw --unw` (~40 s for 1056 pairs). Three tests,
-  each on the pixels filtIon trusts (`filt_msk_init.rdr`: coherence, land, height, sub-band
-  connected component): `--raw` robust range of `raw_no_projection.ion` (blocks from unwrapping
-  errors / swath offsets; possible right after step 22 with `--raw-only`), loop closure of
-  `filt.ion` over all triangles (default), and `--unw` the interferogram semivariogram at 10/30/50 km
-  before/after subtracting the ionosphere. Pairs flagged by raw or closure and not helped by the
-  correction are excluded if the network stays connected; `--apply` adds them to `--exc_pair` in
-  run_24/run_26 (earlier entries kept). All pairs and statistics: `logs/ionqc_<date>.csv`.
-- Mask unwrapping errors before filtering: set `ion.maskFile` (e.g. from `otsu_masking.py`),
-  re-run `stack --ion-config`, then re-run from step 23.
+- 17–24: ionospheric phase from range sub-bands ([Liang et al., 2019](https://ieeexplore.ieee.org/document/8706258)).
+  Step 17 reads the SLC zips again: keep them until it has finished.
+- 22: pairs with different swath starting ranges (`pairs_diff_starting_ranges.txt`) are unwrapped
+  and computed per swath (6 snaphu runs per pair), then `mergeSwathIon.py` aligns the swaths by one
+  constant each. `ion.swathAlign = yes` adds a second alignment in filtIon; default no (a076: worse).
+- 23 (`filtIon.py`) masks: coherence > 0.75, height < 5000 m, common sub-band connected component,
+  water body (`wbdfile`) and `maskfile` if set (`stack --ion-config` sets them).
+- 24/26 (`invertIon.py`) invert pairs to dates; they stop if the network is not connected.
+- 25–28: burst azimuth ramps from the ionospheric azimuth shift (PR #600); need ESD applied.
+- Mask unwrapping errors before filtering: `ion.maskFile` (e.g. `otsu_masking.py`), `stack
+  --ion-config`, re-run from 23.
 
 ## Notes
 

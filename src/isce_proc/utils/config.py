@@ -79,7 +79,7 @@ ion.wbdFile             = auto                       #water body for filtIon, au
 ion.maskFile            = auto                       #extra mask for filtIon (e.g. otsu_msk.rdr), auto for none
 ion.iteration           = auto                       #filtIon iterations, auto for 5
 ion.fill                = auto                       #filtIon fill method, auto for nearest
-ion.swathAlign          = auto                       #[yes / no] swath_align for pairs in pairs_diff_starting_ranges.txt, auto for yes
+ion.swathAlign          = auto                       #[yes / no] swath_align for pairs in pairs_diff_starting_ranges.txt, auto for no (a076: extra alignment made loop closure worse)
 ion.burstRampMask       = auto                       #maskfile for burstRampIon, auto for merged/geom_reference/waterBody.rdr
 ## Slurm
 hpc.track               = auto                       #job name tag, auto from the template name (e.g. a076)
@@ -160,7 +160,7 @@ AUTO_DICT = {
     'ion.maskFile'            : None,
     'ion.iteration'           : 5,
     'ion.fill'                : 'nearest',
-    'ion.swathAlign'          : True,
+    'ion.swathAlign'          : False,
     'ion.burstRampMask'       : None,
     'hpc.track'               : None,
     'hpc.account'             : 'simonsgroup',

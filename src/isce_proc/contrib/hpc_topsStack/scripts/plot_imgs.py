@@ -44,7 +44,7 @@ def cmdLineParse():
     parser.add_argument("-o", "--out", dest="outdir", default="./img",
                         help="Output folder (default: %(default)s)")
     parser.add_argument("-r", "--redo", dest="redo", action="store_true",
-                        help="Replot all .tif images")
+                        help="Replot all images (default: only those without a .png)")
     parser.add_argument("-a", "--amp", dest="overamp", action="store_true",
                         help="Overlay amplitude (only valid for band=2)")
     parser.add_argument("-m", "--mask", dest="maskfile", default=None,
@@ -54,7 +54,9 @@ def cmdLineParse():
     parser.add_argument("-c", "--collage", dest="collage", action="store_true", default=True,
                         help="Collage the images into collage.html (default: %(default)s)")
     parser.add_argument("--svg", dest="svg", action="store_true",
-                        help="Also write collage.svg (links the .tif files)")
+                        help="Also write collage.svg (links the .png files)")
+    parser.add_argument("-n", "--nproc", dest="nproc", type=int, default=8,
+                        help="Images rendered in parallel (default: %(default)s)")
     if len(sys.argv) <= 1:
         parser.print_help(); sys.exit(1)
     return parser.parse_args()
@@ -102,46 +104,48 @@ if __name__ == "__main__":
     <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
     "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
     <svg width="{WIDTH}cm" height="{LENGTH}cm" version="1.1"
-        xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">"""
+        xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <rect width="100%" height="100%" fill="white"/>"""
 
-    tmp_files = []  # temporary masked files to cleanup
-    wdir = tempfile.mkdtemp(dir=odir, prefix=".mdx_")  # own mdx workdir: out.ppm is a fixed name, so runs sharing odir would collide
+    k = max(1, int(round(1.0 / ratio)))  # decimation to the display size: mdx renders the small image
 
-    for i, file in enumerate(files):
-        pair = file.split("/")[inps.loc].split(".")[0]
+    def render(file, pair):
+        """One image: decimate with numpy, render with mdx (own workdir), save the PNG directly."""
+        png = os.path.join(odir, f"{pair}.png")
+        if os.path.isfile(png) and not inps.redo:
+            return
+        im = isceobj.createImage(); im.load(file + ".xml")
+        w, l, nb = im.width, im.length, max(1, int(getattr(im, "bands", 1) or 1))
+        data = np.fromfile(file, dtype=np.float32).reshape(l * nb, w)
+        bands = [data[b::nb][::k, ::k] for b in range(nb)]
+        if mask is not None:
+            bands[-1] = bands[-1] * mask[::k, ::k]
+        small = np.stack(bands, axis=1).reshape(-1, bands[0].shape[1]).astype(np.float32)   # BIL again
+        w2 = bands[0].shape[1]
+        wd = tempfile.mkdtemp(dir=odir, prefix=".mdx_")   # out.ppm is a fixed name: one workdir per image
+        f2 = os.path.join(wd, "img")
+        small.tofile(f2)
+        if inps.band == 1:
+            cmd = f"mdx {f2} -s {w2} -ch1 -r4 -wrap {inps.wrap} -addr -{inps.wrap/2} -cmap CMY -P -workdir {wd}"
+        elif not inps.overamp:
+            cmd = f"mdx {f2} -s {w2} -ch2 -r4 -rhdr {w2*4} -wrap {inps.wrap} -addr -{inps.wrap/2} -cmap CMY -P -workdir {wd}"
+        else:
+            cmd = f"mdx {f2} -s {w2} -amp -r4 -rtlr {w2*4} -CW -unw -r4 -rhdr {w2*4} -wrap {inps.wrap} -addr -{inps.wrap/2} -cmap CMY -P -workdir {wd}"
+        runCmd(cmd + " > /dev/null")
+        runCmd(f"convert {os.path.join(wd, 'out.ppm')} {png}")
+        for x in os.listdir(wd):
+            os.remove(os.path.join(wd, x))
+        os.rmdir(wd)
+
+    from concurrent.futures import ThreadPoolExecutor
+    pairs = [f.split("/")[inps.loc].split(".")[0] for f in files]
+    with ThreadPoolExecutor(inps.nproc) as ex:
+        list(ex.map(render, files, pairs))
+
+    for i, pair in enumerate(pairs):
         mdate, sdate, date = None, None, None
         if "_" in pair: mdate, sdate = pair.split("_")
         else: date = pair
-
-        # replot to tif
-        if inps.redo:
-            img = isceobj.createImage(); img.load(file + ".xml")
-            width, length = img.width, img.length
-            file_to_plot = file
-
-            if mask is not None:
-                data = np.fromfile(file, dtype=np.float32).reshape(length, width)
-                data = (data * mask).astype(np.float32)
-                tmp = tempfile.NamedTemporaryFile(delete=False, dir="/dev/shm", suffix=".ion")
-                data.tofile(tmp.name)
-                file_to_plot = tmp.name
-                tmp_files.append(tmp.name)
-
-            if inps.band == 1:
-                cmd = f"mdx {file_to_plot} -s {width} -ch1 -r4 -wrap {inps.wrap} -addr -{inps.wrap/2} -cmap CMY -P -workdir {wdir}"
-            elif inps.band == 2:
-                if not inps.overamp:
-                    cmd = f"mdx {file_to_plot} -s {width} -ch2 -r4 -rhdr {width*4} -wrap {inps.wrap} -addr -{inps.wrap/2} -cmap CMY -P -workdir {wdir}"
-                else:
-                    cmd = f"mdx {file_to_plot} -s {width} -amp -r4 -rtlr {width*4} -CW -unw -r4 -rhdr {width*4} -wrap {inps.wrap} -addr -{inps.wrap/2} -cmap CMY -P -workdir {wdir}"
-            runCmd(cmd)
-
-            # resize + compress to keep files small
-            ppm = os.path.join(wdir, "out.ppm")
-            tif = os.path.join(odir, f"{pair}.tif")
-            resize = f"-resize {100.0*ratio}%"
-            runCmd(f"convert {ppm} {resize} -compress LZW {tif}")
-            os.remove(ppm)
 
         # collage SVG entries
         if inps.collage:
@@ -154,31 +158,25 @@ if __name__ == "__main__":
                 if any(x in marks for x in [f"{mdate}_{sdate}", f"{sdate}_{mdate}", f"{mdate}-{sdate}", f"{sdate}-{mdate}"]):
                     font_color = ";fill:red"
                     add_box = f'<rect fill="none" stroke="red" stroke-width="2" x="{x0}cm" y="{y0}cm" width="{rW}cm" height="{rL}cm"/>'
-                img_svg = f'''<image xlink:href="{pair}.tif" x="{x0}cm" y="{y0}cm" width="{rW}cm" height="{rL}cm"/>
+                img_svg = f'''<image xlink:href="{pair}.png" x="{x0}cm" y="{y0}cm" width="{rW}cm" height="{rL}cm"/>
                     {add_box}
                     <text x="{x0}cm" y="{y0+rW*0.1}cm" style="font-family:Times;font-size:8px{font_color};">
                     <tspan x="{x0}cm" dy="0">{mdate}_</tspan><tspan x="{x0}cm" dy="1em">{sdate}</tspan></text>'''
             else:
                 if date in marks: font_color = ";fill:red"
-                img_svg = f'''<image xlink:href="{pair}.tif" x="{x0}cm" y="{y0}cm" width="{rW}cm" height="{rL}cm"/>
+                img_svg = f'''<image xlink:href="{pair}.png" x="{x0}cm" y="{y0}cm" width="{rW}cm" height="{rL}cm"/>
                     <text x="{x0}cm" y="{y0+rW*0.1}cm" style="font-family:Times;font-size:8px{font_color};">{date}</text>'''
             svg += img_svg
 
-    # cleanup tmp RAM files
-    for t in tmp_files:
-        try: os.remove(t)
-        except: pass
-
     # colorbar, top right of the collage
     cb_w, cb_l = 100, 20
+    wd = tempfile.mkdtemp(dir=odir, prefix=".mdx_")
     cb = np.ones((cb_l, cb_w), np.float32) * np.linspace(-inps.wrap/2, inps.wrap/2, cb_w, dtype=np.float32)[None,:]
-    cb.astype(np.float32).tofile(os.path.join(odir, "colorbar"))
-    runCmd(f"mdx {os.path.join(odir,'colorbar')} -s {cb_w} -cmap cmy -wrap {inps.wrap} -addr -{inps.wrap/2} -P -workdir {wdir}")
-    ppm = os.path.join(wdir, "out.ppm")
-    cbar = f"colorbar_-{inps.wrap/2:g}_{inps.wrap/2:g}.tif"
-    runCmd(f"convert {ppm} -compress LZW {os.path.join(odir, cbar)}")
-    runCmd(f"rm {os.path.join(odir,'colorbar')} {ppm}")
-    os.rmdir(wdir)
+    cb.astype(np.float32).tofile(os.path.join(wd, "colorbar"))
+    runCmd(f"mdx {os.path.join(wd,'colorbar')} -s {cb_w} -cmap cmy -wrap {inps.wrap} -addr -{inps.wrap/2} -P -workdir {wd} > /dev/null")
+    cbar = f"colorbar_-{inps.wrap/2:g}_{inps.wrap/2:g}.png"
+    runCmd(f"convert {os.path.join(wd, 'out.ppm')} {os.path.join(odir, cbar)}")
+    runCmd(f"rm -r {wd}")
     cbx, cbw = WIDTH - 5.0, 4.0
     svg += f'''<text x="0.3cm" y="0.6cm" style="font-family:Times;font-size:12px;">{inps.input}  ({len(files)} images; red: listed in {inps.date_txt})</text>
         <image xlink:href="{cbar}" x="{cbx}cm" y="0.2cm" width="{cbw}cm" height="0.4cm" preserveAspectRatio="none"/>
@@ -189,11 +187,9 @@ if __name__ == "__main__":
     if inps.svg:
         with open(os.path.join(odir, "collage.svg"), "w") as f: f.write(svg)
 
-    # HTML: the same layout with PNGs (browsers do not show TIFF)
     html_file = os.path.join(odir, "collage.html")
-    runCmd(f"mogrify -format png {odir}/*.tif")
     with open(html_file, "w") as f:
         f.write("<!DOCTYPE html><html><head><meta charset='utf-8'><title>Collage</title></head><body style='margin:0;'>\n"
-                + svg.replace('.tif"', '.png"') + "\n</body></html>\n")
+                + svg + "\n</body></html>\n")
 
     print(f"Done. HTML preview: {html_file}")
