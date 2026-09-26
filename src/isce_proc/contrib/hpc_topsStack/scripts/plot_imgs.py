@@ -102,6 +102,7 @@ if __name__ == "__main__":
         xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">"""
 
     tmp_files = []  # temporary masked files to cleanup
+    wdir = tempfile.mkdtemp(dir=odir, prefix=".mdx_")  # own mdx workdir: out.ppm is a fixed name, so runs sharing odir would collide
 
     for i, file in enumerate(files):
         pair = file.split("/")[inps.loc].split(".")[0]
@@ -124,16 +125,16 @@ if __name__ == "__main__":
                 tmp_files.append(tmp.name)
 
             if inps.band == 1:
-                cmd = f"mdx {file_to_plot} -s {width} -ch1 -r4 -wrap {inps.wrap} -addr -{inps.wrap/2} -cmap CMY -P -workdir {odir}"
+                cmd = f"mdx {file_to_plot} -s {width} -ch1 -r4 -wrap {inps.wrap} -addr -{inps.wrap/2} -cmap CMY -P -workdir {wdir}"
             elif inps.band == 2:
                 if not inps.overamp:
-                    cmd = f"mdx {file_to_plot} -s {width} -ch2 -r4 -rhdr {width*4} -wrap {inps.wrap} -addr -{inps.wrap/2} -cmap CMY -P -workdir {odir}"
+                    cmd = f"mdx {file_to_plot} -s {width} -ch2 -r4 -rhdr {width*4} -wrap {inps.wrap} -addr -{inps.wrap/2} -cmap CMY -P -workdir {wdir}"
                 else:
-                    cmd = f"mdx {file_to_plot} -s {width} -amp -r4 -rtlr {width*4} -CW -unw -r4 -rhdr {width*4} -wrap {inps.wrap} -addr -{inps.wrap/2} -cmap CMY -P -workdir {odir}"
+                    cmd = f"mdx {file_to_plot} -s {width} -amp -r4 -rtlr {width*4} -CW -unw -r4 -rhdr {width*4} -wrap {inps.wrap} -addr -{inps.wrap/2} -cmap CMY -P -workdir {wdir}"
             runCmd(cmd)
 
             # resize + compress to keep files small
-            ppm = os.path.join(odir, "out.ppm")
+            ppm = os.path.join(wdir, "out.ppm")
             tif = os.path.join(odir, f"{pair}.tif")
             resize = f"-resize {100.0*ratio}%"
             runCmd(f"convert {ppm} {resize} -compress LZW {tif}")
@@ -172,11 +173,12 @@ if __name__ == "__main__":
     cb_w, cb_l = 100, 20
     cb = np.ones((cb_l, cb_w), np.float32) * np.linspace(-inps.wrap/2, inps.wrap/2, cb_w, dtype=np.float32)[None,:]
     cb.astype(np.float32).tofile(os.path.join(odir, "colorbar"))
-    runCmd(f"mdx {os.path.join(odir,'colorbar')} -s {cb_w} -cmap cmy -wrap {inps.wrap} -addr -{inps.wrap/2} -P -workdir {odir}")
-    ppm = os.path.join(odir, "out.ppm")
+    runCmd(f"mdx {os.path.join(odir,'colorbar')} -s {cb_w} -cmap cmy -wrap {inps.wrap} -addr -{inps.wrap/2} -P -workdir {wdir}")
+    ppm = os.path.join(wdir, "out.ppm")
     tif = os.path.join(odir, f"colorbar_-{inps.wrap/2}_{inps.wrap/2}.tiff")
     runCmd(f"convert {ppm} -compress LZW {tif}")
     runCmd(f"rm {os.path.join(odir,'colorbar')} {ppm}")
+    os.rmdir(wdir)
 
     # HTML
     html_file = os.path.join(odir, "collage.html")
