@@ -14,8 +14,8 @@ from commands.data import SCRIPTS, _log, _run
 # plot_imgs.py calls: (input glob, --loc, --band, output name, extra args)
 # units: ionospheric phase [rad]; azimuth shift [single-look azimuth lines, x ~14 m]; burst ramp [rad]
 AMP = 'AMP'   # replaced by the first merged/interferograms/*/filt_fine.unw (amplitude background, same grid)
-MARKS = ['pairs_diff_starting_ranges.txt:blue:diff. starting ranges',
-         'logs/ionqc_check.txt:orange:ionqc check', 'logs/ionqc_exclude.txt:red:ionqc exclude']
+MARKS = ['pairs_diff_starting_ranges.txt:blue:diff. starting ranges', 'CHECK:orange:ionqc check',
+         'EXCLUDE:red:excluded (ionqc / run_24)']   # CHECK/EXCLUDE: from the latest logs/ionqc_*.csv
 IMGS = {
     'ion': [('ion/*_*/ion_cal/filt.ion', -3, 2, 'img_ion', ['--amp', '-u', 'rad'] + sum((['--mark', m] for m in MARKS), [])),
             ('ion_dates/*.ion', 1, 1, 'img_ion_dates', ['--wrap', '6.28', '-u', 'rad', '--amp-file', AMP, '--diff']),
@@ -25,7 +25,29 @@ IMGS = {
 }
 
 
+def _ionqc_lists(c, tmp):
+    """Pair lists from the latest ionqc CSV for --mark: {'CHECK': file, 'EXCLUDE': file}."""
+    import csv
+    f = sorted(glob.glob(os.path.join(c.stack, 'logs', 'ionqc_*.csv')))
+    rows = list(csv.DictReader(open(f[-1]))) if f else []
+    out = {}
+    for key, test in (('CHECK', lambda s: s == 'check'), ('EXCLUDE', lambda s: s.startswith('exclude'))):
+        out[key] = os.path.join(tmp, key.lower() + '.txt')
+        open(out[key], 'w').write('\n'.join(r['pair'] for r in rows if test(r.get('status', ''))) + '\n')
+    return out
+
+
 def plot(c, what, extra=()):
+    import shutil
+    import tempfile
+    tmp = tempfile.mkdtemp(prefix='ionqc_marks_')
+    try:
+        return _plot(c, what, extra, _ionqc_lists(c, tmp))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _plot(c, what, extra, lists):
     pic = os.path.join(c.stack, 'pic')
     os.makedirs(pic, exist_ok=True)
     rc = 0
@@ -35,7 +57,8 @@ def plot(c, what, extra=()):
                 if not glob.glob(os.path.join(c.stack, pat)):
                     print(f'skip {pat}: no files')
                     continue
-                opts = list(opts)                               # missing --mark lists are skipped by plot_imgs.py
+                opts = [o.replace('CHECK:', lists['CHECK'] + ':').replace('EXCLUDE:', lists['EXCLUDE'] + ':')
+                        for o in opts]                          # missing --mark lists are skipped by plot_imgs.py
                 if AMP in opts:
                     unw = sorted(glob.glob(os.path.join(c.stack, 'merged', 'interferograms', '*_*', 'filt_fine.unw')))
                     i = opts.index(AMP)

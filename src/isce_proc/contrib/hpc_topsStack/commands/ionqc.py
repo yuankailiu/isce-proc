@@ -222,6 +222,73 @@ def correction(c, pairs, shape, dists, nproc, cor_min=0.5):
             (dy_km, dx_km))
 
 
+# ---------------------------------------------------------------- seam test
+def _invert(ion, used, dates):
+    """Per-date ionosphere [n_date, pix] from pair maps by least squares (first date = 0), like
+    invertIon.py without weights: I(a,b) = phi_b - phi_a."""
+    idx = {d: i for i, d in enumerate(dates)}
+    H = np.zeros((len(used), len(dates)))
+    for k, q in enumerate(used):
+        a, b = q.split('_')
+        H[k, idx[a]], H[k, idx[b]] = -1, 1
+    obs = np.stack([np.nan_to_num(ion[q]).ravel() for q in used])
+    ts = np.zeros((len(dates), obs.shape[1]))
+    ts[1:] = np.linalg.lstsq(H[:, 1:], obs, rcond=None)[0]
+    return ts
+
+
+def seam_test(c, pairs, sets, dist, nproc, step=4, span_max=2, dt_max=60, cor_min=0.5):
+    """Where the ionospheric network is thin (<= span_max ion pairs span a date boundary), score each
+    exclusion set by the interferograms that span the boundary: variance ratio (unw - ion) / unw at
+    `dist` km of the inverted per-date ionosphere. Only these interferograms see the block offset a
+    thin boundary allows (a120_south 2026-09-22). sets: {'A': excluded pairs, 'B': ...}.
+    Returns [(boundary date, {set: (median ratio, n ifgs)}, n spanning ion pairs per set)]."""
+    from skimage.transform import resize
+    dates = sorted({d for q in pairs for d in q.split('_')})
+    spans = {}
+    for name, exc in sets.items():
+        used = [q for q in pairs if q not in exc]
+        spans[name] = {t: sum(q.split('_')[0] < t <= q.split('_')[1] for q in used) for t in dates[1:]}
+    thin = [t for t in dates[1:] if min(spans[n][t] for n in sets) <= span_max]
+    ifg_dir = os.path.join(c.stack, 'merged', 'interferograms')
+    ifgs = sorted(os.path.basename(os.path.dirname(f)) for f in glob.glob(os.path.join(ifg_dir, '*_*', 'filt_fine.unw')))
+    todo = {t: [q for q in ifgs if q.split('_')[0] < t <= q.split('_')[1]
+                and (datetime.strptime(q[9:], '%Y%m%d') - datetime.strptime(q[:8], '%Y%m%d')).days <= dt_max]
+            for t in thin}
+    todo = {t: v for t, v in todo.items() if v}
+    if not todo:
+        return [], thin
+    with ThreadPoolExecutor(nproc) as ex:
+        ion = dict(zip(pairs, ex.map(lambda q: _band(os.path.join(c.stack, 'ion', q, 'ion_cal', 'filt.ion'), 2, 2, step), pairs)))
+    shape = next(iter(ion.values())).shape
+    full = _band(os.path.join(c.stack, 'ion', pairs[0], 'ion_cal', 'filt.ion'), 2, 2).shape
+    lat, lon = _geom(c, 'lat', full)[::step, ::step], _geom(c, 'lon', full)[::step, ::step]
+    dy = np.nanmedian(np.abs(np.diff(lat, axis=0))) * 111.2
+    dx = np.hypot(np.nanmedian(np.abs(np.diff(lat, axis=1))) * 111.2,
+                  np.nanmedian(np.abs(np.diff(lon, axis=1))) * 111.2 * np.cos(np.radians(np.nanmean(lat))))
+    lags = [(int(round(dist * np.sin(t) / dy)), int(round(dist * np.cos(t) / dx))) for t in np.linspace(0, np.pi, 8, endpoint=False)]
+    ts = {n: _invert(ion, [q for q in pairs if q not in exc], dates) for n, exc in sets.items()}
+    di = {d: i for i, d in enumerate(dates)}
+
+    def one(q):
+        d = os.path.join(ifg_dir, q)
+        unw = resize(_band(os.path.join(d, 'filt_fine.unw'), 2, 2), full, order=0, preserve_range=True, anti_aliasing=False)[::step, ::step]
+        cor = resize(_band(os.path.join(d, 'filt_fine.cor'), 1, 1), full, order=0, preserve_range=True, anti_aliasing=False)[::step, ::step]
+        a, b = q.split('_')
+        unw = np.where(np.nan_to_num(cor) > cor_min, unw, np.nan)
+        g0 = _semivar(unw, lags)
+        return q, {n: (_semivar(unw - (t[di[b]] - t[di[a]]).reshape(shape), lags) / g0 if a in di and b in di else np.nan)
+                   for n, t in ts.items()}
+    need = sorted({q for v in todo.values() for q in v})
+    with ThreadPoolExecutor(nproc) as ex:
+        res = dict(ex.map(one, need))
+    out = []
+    for t, qs in todo.items():
+        out.append((t, {n: (float(np.nanmedian([res[q][n] for q in qs])), len(qs)) for n in sets},
+                    {n: spans[n][t] for n in sets}))
+    return out, thin
+
+
 # ---------------------------------------------------------------- run files
 def _exc_now(c):
     run = sorted(glob.glob(os.path.join(c.stack, 'run_files', 'run_[0-9][0-9]_invertIon')))
@@ -328,42 +395,93 @@ def ionqc(c, raw=False, closure_test=True, unw=False, apply=False, nproc=8, step
         else:
             keep_bridge.append(p)
 
+    # seam test: where the network is thin, compare the current exclusions (A) with the proposal (B)
+    # on the interferograms spanning the thin boundary; drop proposed exclusions that make it worse
+    seams, seam_note = [], []
+    if unw:
+        A, B = set(q for q in old if q in pairs), set(exc)
+        seams, thin = seam_test(c, pairs, {'A': A, 'B': B}, dist_test, nproc)
+        for t, sc, sp in seams:
+            (ra, n), (rb, _) = sc['A'], sc['B']
+            worse = A != B and rb > 1.05 * ra
+            seam_note.append(f'  {t}: ion pairs spanning A {sp["A"]} / B {sp["B"]}; {n} interferograms, '
+                             f'ratio A {ra:.2f} / B {rb:.2f}' + (' -> B worse, keep A there' if worse else ''))
+            if worse:
+                back = [q for q in exc if q not in A and q.split('_')[0] < t <= q.split('_')[1]]
+                exc = [q for q in exc if q not in back]
+                back_ = [q for q in back]
+                for q in back_:
+                    if q in bad:
+                        bad.remove(q)
+                    check.append(q)
+
     # pairs closure cannot validate: no triangle, or a bridge of the network in use (removing it splits
     # the epochs). There the pair IS the network's prediction; judge them with interferograms that span
     # them, and do not restore an excluded one on closure alone (a120_south 2026-09-22).
     used = [q for q in pairs if q not in exc]
     bridges = [q for q in used if not _connected([x for x in used if x != q])] if len(used) < 3000 else []
-    weak = sorted(set(bridges) | {q for q in pairs if clo[q][1] == 0})
+    weak = set(bridges) | {q for q in pairs if clo[q][1] == 0}
+    new = sorted(set(exc) - set(old))
+    clean_old = sorted(q for q in old if q in pairs and q not in bad and q not in weak)
+
+    def status(q):
+        if q in new: return 'exclude (new)'
+        if q in old: return 'excluded (yours, looks clean)' if q in clean_old else 'excluded (yours)'
+        if q in keep_bridge: return 'flagged, kept (bridge)'
+        if q in check: return 'check'
+        return 'ok'
+
+    # one CSV with everything, one short TXT with the decision
     stamp = f'{datetime.now():%Y-%m-%d}'
     os.makedirs(os.path.join(c.stack, 'logs'), exist_ok=True)
-    head = ['pair', 'dt_days', 'raw_spread_rad', 'n_triangles', 'closure_rms_rad'] + [f'var_ratio_{d}km' for d in dists] + ['flag']
-    with open(os.path.join(c.stack, 'logs', f'ionqc_{stamp}.csv'), 'w', newline='') as f:
-        csv.writer(f).writerows([head] + rows)
-    lines = stats + ['', f"{'pair':18} {'dt':>5} {'raw':>7} {'ntri':>4} {'closure':>8} "
-                     + ' '.join(f'{f"r{d}km":>7}' for d in dists) + '  flag']
-    for r in rows:
-        if r[-1] or r[0] in old:
-            lines.append(f'{r[0]:18} {r[1]:5d} {r[2]:7.1f} {r[3]:4d} {r[4]:8.2f} ' + ' '.join(f'{x:7.2f}' for x in r[5:-1])
-                         + f'  {r[-1] or "(already excluded, not flagged now)"}')
-    new = sorted(set(exc) - set(old))
-    lines += ['', f'exclude ({len(exc)}): {" ".join(sorted(exc)) or "none"}',
-              f'not validated by closure ({len(weak)}: no triangle or a network bridge; excluded ones among them '
-              f'stay excluded): {" ".join(weak) or "none"}',
-              f'  already in {os.path.basename(run24) if run24 else "run_24"}: {" ".join(old) or "none"}; new: {" ".join(new) or "none"}',
-              f'check by eye ({len(check)}): {" ".join(check) or "none"}']
-    if keep_bridge:
-        lines.append(f'flagged but kept (removal would disconnect the network): {" ".join(keep_bridge)}')
-    if apply and new:
-        lines.append(f'applied to: {", ".join(apply_exc(c, exc))} (re-run from step 24)')
-    elif apply:
-        lines.append('nothing new to apply')
+    head = (['pair', 'dt_days', 'raw_spread_rad', 'n_triangles', 'closure_rms_rad'] + [f'var_ratio_{d}km' for d in dists]
+            + ['status', 'closure_unvalidated', 'reason'])
+    out = [r[:-1] + [status(r[0]), int(r[0] in weak), r[-1].replace(' -> exclude', '').replace(' -> check', '').strip(' ;')] for r in rows]
+    fcsv = os.path.join(c.stack, 'logs', f'ionqc_{stamp}.csv')
+    with open(fcsv, 'w', newline='') as f:
+        csv.writer(f).writerows([head] + out)
+
+    if new:
+        decision = f'APPLY {len(new)} new exclusion(s): topsstack.py ionqc TEMPLATE --raw --unw --apply, then submit -s 24'
+    elif check:
+        decision = f'KEEP; look at {len(check)} pair(s) in the ion figures (orange boxes)'
     else:
-        lines.append('write it with --apply (then re-run from step 24)')
+        decision = 'KEEP as is'
+    a100 = np.array([v[dists.index(dist_test)] for v in cr.values() if np.isfinite(v[dists.index(dist_test)])])
+    info = [f'{len(pairs)} pairs', f'excluded now {len(old)}']
+    if closure_test:
+        info.append(f'closure median {med:.2f} rad (flag > {thr:.1f})')
+    if raw:
+        info.append(f'raw median {rmed:.0f} rad (flag > {rthr:.0f})')
+    if a100.size:
+        info.append(f'correction at {dist_test} km: median ratio {np.median(a100):.2f}, helps {100 * (a100 < 1).mean():.0f}%')
+    byp = {r[0]: r for r in out}
+
+    def show(title, lst):
+        if not lst:
+            return []
+        L = [f'{title} ({len(lst)}):']
+        for q in lst[:10]:
+            r = byp[q]
+            L.append(f'  {q}  dt {r[1]:>4} d  raw {r[2]:5.0f}  closure {r[4]:6.2f}  r{dist_test} {r[5 + dists.index(dist_test)]:6.2f}  {r[-1]}')
+        return L + ([f'  ... {len(lst) - 10} more in the CSV'] if len(lst) > 10 else [])
+    lines = [f'{"/".join(c.stack.rstrip("/").split("/")[-2:])} {datetime.now():%F %T}: {decision}', '  ' + '; '.join(info)]
+    lines += show('new exclusions', new) + show('look at', check)
+    lines += show('your exclusions that look clean (restore only after a seam test)', clean_old)
+    if seam_note:
+        lines += [f'thin boundaries (<= 2 ion pairs span them), scored by spanning interferograms at {dist_test} km '
+                  '(ratio < 1: the ionosphere helps; A = current exclusions, B = with the new ones):'] + seam_note
+    if keep_bridge:
+        lines.append(f'flagged but kept, removal would split the network: {" ".join(keep_bridge)}')
+    if apply and new:
+        lines.append(f'applied to {", ".join(apply_exc(c, exc))}; re-run from step 24')
+    lines.append(f'details: {os.path.relpath(fcsv, c.stack)}')
     txt = '\n'.join(lines)
-    for name, lst in (('exclude', exc), ('check', check), ('unvalidated', weak)):          # latest lists, e.g. for plot --mark
-        open(os.path.join(c.stack, 'logs', f'ionqc_{name}.txt'), 'w').write('\n'.join(sorted(lst)) + '\n')
     open(os.path.join(c.stack, 'logs', f'ionqc_{stamp}.txt'), 'w').write(txt + '\n')
+    for f in glob.glob(os.path.join(c.stack, 'logs', 'ionqc_[a-z]*.txt')):     # lists of earlier versions
+        if not re.search(r'ionqc_\d{4}-', f):
+            os.remove(f)
     with _log(c, 'ionqc') as log:
-        log.write(txt.splitlines()[0] + f'  exclude: {" ".join(sorted(exc))}{"  (applied)" if apply and new else ""}\n')
+        log.write(lines[0] + (f'  exclude: {" ".join(sorted(exc))}' if exc else '') + '\n')
     print(txt)
     return 0
