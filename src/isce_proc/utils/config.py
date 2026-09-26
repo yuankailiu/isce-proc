@@ -38,6 +38,7 @@ isce.updateMode         = yes                        #[yes / no], auto for yes
 ## ionospheric phase estimation
 ## copy $ISCE_STACK/topsStack/ion_param.txt to the local dir to turn ON iono
 isce.numConnectionIon   = 3                          #[int>=1], auto for 3
+isce.numConnectionIonBridge = auto                   #[int>=1] ion pairs across each boundary of different swath starting ranges (per end), auto for 5
 isce.paramIonFile       = ./ion_param.txt            #Ion param file, auto for none (no iono estimation)
 
 ##----------for stripmapStack only:
@@ -126,6 +127,7 @@ AUTO_DICT = {
     'isce.numProcess4topo'    : None,
     'isce.updateMode'         : True,
     'isce.numConnectionIon'   : '3',
+    'isce.numConnectionIonBridge' : '5',
     'isce.paramIonFile'       : None,
 
     #for stripmapStack only
