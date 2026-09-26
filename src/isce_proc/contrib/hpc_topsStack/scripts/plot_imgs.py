@@ -17,6 +17,9 @@ import tempfile
 import isce, isceobj
 from argparse import RawTextHelpFormatter
 from isceobj.Alos2Proc.Alos2ProcPublic import runCmd
+import shutil
+
+IM = "magick" if shutil.which("magick") else "convert"   # ImageMagick 7 / 6
 
 
 def cmdLineParse():
@@ -147,7 +150,7 @@ if __name__ == "__main__":
         else:
             cmd = f"mdx {f2} -s {w2} -amp -r4 -rtlr {w2*4} -CW -unw -r4 -rhdr {w2*4} -wrap {inps.wrap} -addr -{inps.wrap/2} -cmap CMY -P -workdir {wd}"
         runCmd(cmd + " > /dev/null")
-        runCmd(f"convert {os.path.join(wd, 'out.ppm')} {png}")
+        runCmd(f"{IM} {os.path.join(wd, 'out.ppm')} {png}")
         for x in os.listdir(wd):
             os.remove(os.path.join(wd, x))
         os.rmdir(wd)
@@ -186,7 +189,7 @@ if __name__ == "__main__":
     cb.astype(np.float32).tofile(os.path.join(wd, "colorbar"))
     runCmd(f"mdx {os.path.join(wd,'colorbar')} -s {cb_w} -cmap cmy -wrap {inps.wrap} -addr -{inps.wrap/2} -P -workdir {wd} > /dev/null")
     cbar = f"colorbar_-{inps.wrap/2:g}_{inps.wrap/2:g}.png"
-    runCmd(f"convert {os.path.join(wd, 'out.ppm')} {os.path.join(odir, cbar)}")
+    runCmd(f"{IM} {os.path.join(wd, 'out.ppm')} {os.path.join(odir, cbar)}")
     runCmd(f"rm -r {wd}")
     cbx, cbw = WIDTH - 5.0, 4.0
     svg += f'''<text x="0.3cm" y="0.6cm" style="font-family:Times;font-size:12px;">{inps.input}  ({len(files)} images)</text>''' + "".join(
