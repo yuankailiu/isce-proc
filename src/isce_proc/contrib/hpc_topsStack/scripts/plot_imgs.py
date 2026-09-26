@@ -49,6 +49,11 @@ def cmdLineParse():
                         help="Overlay amplitude (only valid for band=2)")
     parser.add_argument("-m", "--mask", dest="maskfile", default=None,
                         help="Optional mask raster (same size, e.g. waterBody.rdr, 0=water,1=land)")
+    parser.add_argument("--mark", dest="mark", action="append", default=[], metavar="FILE[:COLOR[:LABEL]]",
+                        help="Box the dates/pairs listed in FILE (repeatable; later ones on top), "
+                             "e.g. --mark pairs_diff_starting_ranges.txt:blue:'diff. starting ranges'")
+    parser.add_argument("-u", "--unit", dest="unit", default="rad",
+                        help="Unit of the colorbar values (default: %(default)s)")
     parser.add_argument("-t", "--txt", dest="date_txt", default=None,
                         help="Text file listing dates/pairs to highlight")
     parser.add_argument("-c", "--collage", dest="collage", action="store_true", default=True,
@@ -81,11 +86,21 @@ if __name__ == "__main__":
         mask = np.fromfile(inps.maskfile, dtype=np.int8).reshape(length, width)
 
     # read highlight dates/pairs
-    marks = []
-    if inps.date_txt:
-        with open(inps.date_txt) as f:
-            marks = [ln.strip() for ln in f if ln.strip() and ln[0].isdigit()]
-        marks = list(set(marks))
+    # highlight lists: [(names, color, label)]; --txt is --mark FILE:red
+    def _names(f):
+        out = set()
+        for ln in open(f):
+            for tok in ln.split():
+                if tok[0].isdigit():
+                    out |= {tok, tok.replace('-', '_')}
+        return out
+    groups = []
+    for spec in ([f"{inps.date_txt}:red"] if inps.date_txt else []) + inps.mark:
+        f, color, label = (spec.split(":", 2) + ["red", ""])[:3]
+        if os.path.isfile(f):
+            groups.append((_names(f), color, label or os.path.basename(f)))
+        else:
+            print(f"--mark: {f} not found, skipped")
 
     # gauge first file for layout
     img = isceobj.createImage(); img.load(files[0] + ".xml")
@@ -153,19 +168,15 @@ if __name__ == "__main__":
             jj = i + 1 - (ii - 1) * ipl
             x0 = rW * 0.85 * (jj - 1) + rW / 5
             y0 = rL * 0.82 * (ii - 1) + rL / 8 + HEAD
-            font_color, add_box = "", ""
-            if mdate and sdate:
-                if any(x in marks for x in [f"{mdate}_{sdate}", f"{sdate}_{mdate}", f"{mdate}-{sdate}", f"{sdate}-{mdate}"]):
-                    font_color = ";fill:red"
-                    add_box = f'<rect fill="none" stroke="red" stroke-width="2" x="{x0}cm" y="{y0}cm" width="{rW}cm" height="{rL}cm"/>'
-                img_svg = f'''<image xlink:href="{pair}.png" x="{x0}cm" y="{y0}cm" width="{rW}cm" height="{rL}cm"/>
-                    {add_box}
-                    <text x="{x0}cm" y="{y0+rW*0.1}cm" style="font-family:Times;font-size:8px{font_color};">
-                    <tspan x="{x0}cm" dy="0">{mdate}_</tspan><tspan x="{x0}cm" dy="1em">{sdate}</tspan></text>'''
-            else:
-                if date in marks: font_color = ";fill:red"
-                img_svg = f'''<image xlink:href="{pair}.png" x="{x0}cm" y="{y0}cm" width="{rW}cm" height="{rL}cm"/>
-                    <text x="{x0}cm" y="{y0+rW*0.1}cm" style="font-family:Times;font-size:8px{font_color};">{date}</text>'''
+            name = f"{mdate}_{sdate}" if mdate else date
+            hit = [(c, i) for i, (n, c, _) in enumerate(groups) if name in n]
+            font_color = f";fill:{hit[-1][0]}" if hit else ""
+            add_box = "".join(f'<rect fill="none" stroke="{c}" stroke-width="{2 + i}" x="{x0}cm" y="{y0}cm" width="{rW}cm" height="{rL}cm"/>'
+                              for c, i in hit)
+            label = (f'<tspan x="{x0}cm" dy="0">{mdate}_</tspan><tspan x="{x0}cm" dy="1em">{sdate}</tspan>' if mdate else date)
+            img_svg = f'''<image xlink:href="{pair}.png" x="{x0}cm" y="{y0}cm" width="{rW}cm" height="{rL}cm"/>
+                {add_box}
+                <text x="{x0}cm" y="{y0+rW*0.1}cm" style="font-family:Times;font-size:8px{font_color};">{label}</text>'''
             svg += img_svg
 
     # colorbar, top right of the collage
@@ -178,11 +189,13 @@ if __name__ == "__main__":
     runCmd(f"convert {os.path.join(wd, 'out.ppm')} {os.path.join(odir, cbar)}")
     runCmd(f"rm -r {wd}")
     cbx, cbw = WIDTH - 5.0, 4.0
-    svg += f'''<text x="0.3cm" y="0.6cm" style="font-family:Times;font-size:12px;">{inps.input}  ({len(files)} images; red: listed in {inps.date_txt})</text>
+    svg += f'''<text x="0.3cm" y="0.6cm" style="font-family:Times;font-size:12px;">{inps.input}  ({len(files)} images)</text>''' + "".join(
+        f'<text x="{10 + 6*i}cm" y="0.6cm" style="font-family:Times;font-size:12px;fill:{c};">&#9633; {lab} ({len({x.replace("-", "_") for x in n})})</text>'
+        for i, (n, c, lab) in enumerate(groups)) + f'''
         <image xlink:href="{cbar}" x="{cbx}cm" y="0.2cm" width="{cbw}cm" height="0.4cm" preserveAspectRatio="none"/>
         <text x="{cbx}cm" y="0.9cm" style="font-family:Times;font-size:10px;" text-anchor="middle">{-inps.wrap/2:g}</text>
         <text x="{cbx+cbw/2}cm" y="0.9cm" style="font-family:Times;font-size:10px;" text-anchor="middle">0</text>
-        <text x="{cbx+cbw}cm" y="0.9cm" style="font-family:Times;font-size:10px;" text-anchor="middle">{inps.wrap/2:g} (wrapped)</text>'''
+        <text x="{cbx+cbw}cm" y="0.9cm" style="font-family:Times;font-size:10px;" text-anchor="middle">{inps.wrap/2:g} {inps.unit} (wrapped)</text>'''
     svg += "</svg>"
     if inps.svg:
         with open(os.path.join(odir, "collage.svg"), "w") as f: f.write(svg)

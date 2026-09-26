@@ -12,11 +12,14 @@ import sys
 from commands.data import SCRIPTS, _log, _run
 
 # plot_imgs.py calls: (input glob, --loc, --band, output name, extra args)
+# units: ionospheric phase [rad]; azimuth shift [single-look azimuth lines, x ~14 m]; burst ramp [rad]
+MARKS = ['pairs_diff_starting_ranges.txt:blue:diff. starting ranges',
+         'logs/ionqc_check.txt:orange:ionqc check', 'logs/ionqc_exclude.txt:red:ionqc exclude']
 IMGS = {
-    'ion': [('ion/*_*/ion_cal/filt.ion', -3, 2, 'img_ion', ['--txt', 'pairs_diff_starting_ranges.txt', '--amp']),
-            ('ion_dates/*.ion', 1, 1, 'img_ion_dates', ['--wrap', '6.28']),
-            ('ion_azshift_dates/*.ion', 1, 1, 'img_azshiftDate', ['--wrap', '0.00628']),
-            ('ion_burst_ramp_merged_dates/*.float', -1, 1, 'img_ionRampDate', ['--wrap', '0.0628'])],
+    'ion': [('ion/*_*/ion_cal/filt.ion', -3, 2, 'img_ion', ['--amp', '-u', 'rad'] + sum((['--mark', m] for m in MARKS), [])),
+            ('ion_dates/*.ion', 1, 1, 'img_ion_dates', ['--wrap', '6.28', '-u', 'rad']),
+            ('ion_azshift_dates/*.ion', 1, 1, 'img_azshiftDate', ['--wrap', '0.00628', '-u', 'az. lines']),
+            ('ion_burst_ramp_merged_dates/*.float', -1, 1, 'img_ionRampDate', ['--wrap', '0.0628', '-u', 'rad'])],
     'unw': [('merged/interferograms/*_*/filt_fine.unw', -2, 2, 'img_unw', ['--amp'])],
 }
 
@@ -31,10 +34,7 @@ def plot(c, what, extra=()):
                 if not glob.glob(os.path.join(c.stack, pat)):
                     print(f'skip {pat}: no files')
                     continue
-                opts = list(opts)
-                if '--txt' in opts and not os.path.isfile(os.path.join(c.stack, opts[opts.index('--txt') + 1])):
-                    i = opts.index('--txt')
-                    del opts[i:i + 2]                           # highlight list not there: plot without it
+                opts = list(opts)                               # missing --mark lists are skipped by plot_imgs.py
                 rc |= _run([sys.executable, os.path.join(SCRIPTS, 'plot_imgs.py'), '-i', pat, '--redo', '--loc', str(loc),
                             '--band', str(band), '--out', os.path.join('pic', out), *opts, *extra], c.stack, log)
         elif what == 'baselines':

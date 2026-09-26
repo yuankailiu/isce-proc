@@ -171,8 +171,8 @@ def cmd_ionqc(c, extra):
 
 
 def cmd_plot(c, extra):
-    if not extra:
-        sys.exit('topsstack.py plot TEMPLATE {ion,unw,baselines,network} [tool options]')
+    if not extra or extra[0].startswith('-'):
+        extra = ['ion'] + list(extra)                   # default: the ionosphere figures
     return plot.plot(c, extra[0], extra[1:])
 
 

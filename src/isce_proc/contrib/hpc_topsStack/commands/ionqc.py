@@ -322,6 +322,8 @@ def ionqc(c, raw=False, closure_test=True, unw=False, apply=False, nproc=8, step
     else:
         lines.append('write it with --apply (then re-run from step 24)')
     txt = '\n'.join(lines)
+    for name, lst in (('exclude', exc), ('check', check)):          # latest lists, e.g. for plot --mark
+        open(os.path.join(c.stack, 'logs', f'ionqc_{name}.txt'), 'w').write('\n'.join(sorted(lst)) + '\n')
     open(os.path.join(c.stack, 'logs', f'ionqc_{stamp}.txt'), 'w').write(txt + '\n')
     with _log(c, 'ionqc') as log:
         log.write(txt.splitlines()[0] + f'  exclude: {" ".join(sorted(exc))}{"  (applied)" if apply and new else ""}\n')
