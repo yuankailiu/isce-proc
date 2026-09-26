@@ -15,7 +15,6 @@ from commands.data import _log
 ITEMS = [
     ('reference/IW*.xml', []),                       # stack metadata
     ('baselines', []),
-    ('merged/geom_reference', ['--exclude', '*.full.*']),
     ('merged/interferograms', []),
     ('ion/*/ion_cal', []),
     ('ion_dates', []),
@@ -42,6 +41,10 @@ def export(c, dry_run=False, nproc=4):
         if srcs:
             rel = [os.path.relpath(s, c.stack) for s in srcs]
             jobs.append((pattern, ['rsync', '-aR', *(['-n'] if dry_run else []), '--stats', *opts, *rel, target + '/']))
+    geom = os.path.join(c.stack, 'merged', 'geom_reference')      # -> geom_reference/ on top (as on marmot)
+    if os.path.isdir(geom):
+        jobs.append(('geom_reference', ['rsync', '-a', *(['-n'] if dry_run else []), '--stats', '--exclude', '*.full*',
+                                        geom + '/', os.path.join(target, 'geom_reference') + '/']))
     data_dst = os.path.join(target, 'data') + '/'                  # data-dir records, not the zips
     jobs.append(('data (no zips)', ['rsync', '-a', *(['-n'] if dry_run else []), '--stats', '--exclude', '*.zip',
                                     '--exclude', 'not_used/', c.data + '/', data_dst]))
