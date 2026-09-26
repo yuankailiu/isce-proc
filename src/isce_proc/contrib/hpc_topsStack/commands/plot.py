@@ -18,9 +18,9 @@ MARKS = ['pairs_diff_starting_ranges.txt:blue:diff. starting ranges',
          'logs/ionqc_check.txt:orange:ionqc check', 'logs/ionqc_exclude.txt:red:ionqc exclude']
 IMGS = {
     'ion': [('ion/*_*/ion_cal/filt.ion', -3, 2, 'img_ion', ['--amp', '-u', 'rad'] + sum((['--mark', m] for m in MARKS), [])),
-            ('ion_dates/*.ion', 1, 1, 'img_ion_dates', ['--wrap', '6.28', '-u', 'rad', '--amp-file', AMP]),
-            ('ion_azshift_dates/*.ion', 1, 1, 'img_azshiftDate', ['--wrap', '0.00628', '-u', 'az. lines', '--amp-file', AMP]),
-            ('ion_burst_ramp_merged_dates/*.float', -1, 1, 'img_ionRampDate', ['--wrap', '0.0628', '-u', 'rad', '--amp-file', AMP])],
+            ('ion_dates/*.ion', 1, 1, 'img_ion_dates', ['--wrap', '6.28', '-u', 'rad', '--amp-file', AMP, '--diff']),
+            ('ion_azshift_dates/*.ion', 1, 1, 'img_azshiftDate', ['--wrap', '0.00628', '-u', 'az. lines', '--amp-file', AMP, '--diff']),
+            ('ion_burst_ramp_merged_dates/*.float', -1, 1, 'img_ionRampDate', ['--wrap', '0.0628', '-u', 'rad', '--amp-file', AMP, '--diff'])],
     'unw': [('merged/interferograms/*_*/filt_fine.unw', -2, 2, 'img_unw', ['--amp'])],
 }
 

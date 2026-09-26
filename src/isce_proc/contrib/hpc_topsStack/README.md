@@ -169,14 +169,15 @@ redraw (other options after the target go to `scripts/plot_imgs.py`, e.g. `-n 16
 | target | `pic/` | content | colorbar cycle |
 |---|---|---|---|
 | `ion` (default) | `img_ion_amp` | ionosphere per pair, `ion/*/ion_cal/filt.ion` | 2π rad |
-| | `img_ion_dates` | ionosphere per date (step 24) | 2π rad |
-| | `img_azshiftDate` | azimuth shift per date (step 26) | 0.00628 single-look lines (~9 cm) |
-| | `img_ionRampDate` | burst phase ramp per date (step 28) | 0.0628 rad |
+| | `img_ion_dates_amp` | ionosphere per date (step 24) | 2π rad |
+| | `img_azshiftDate_amp` | azimuth shift per date (step 26) | 0.00628 single-look lines (~9 cm) |
+| | `img_ionRampDate_amp` | burst phase ramp per date (step 28) | 0.0628 rad |
 | `unw` | `img_unw_amp` | all interferograms (many; only on request) | 2π rad |
 | `baselines` | `pic/` | perpendicular-baseline history | |
 | `network` | `pic/` | networks by starting range / IPF version | |
 
-Boxes on the pair figures: blue = `pairs_diff_starting_ranges.txt`, orange = ionqc check,
+Per-date figures (`--diff`): each date minus the previous one, then the last date (cumulative) and the
+linear rate per pixel [unit/yr]; over an interferogram amplitude. Boxes on the pair figures: blue = `pairs_diff_starting_ranges.txt`, orange = ionqc check,
 red = ionqc exclude (after `ionqc`). Own lists: `plot TEMPLATE ion --mark FILE:COLOR:LABEL`.
 
 ## The template

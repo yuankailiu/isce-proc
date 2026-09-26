@@ -48,6 +48,9 @@ def cmdLineParse():
                         help="Output folder (default: %(default)s)")
     parser.add_argument("-r", "--redo", dest="redo", action="store_true",
                         help="Replot all images (default: only those without a .png)")
+    parser.add_argument("--diff", dest="diff", action="store_true",
+                        help="Per-date files: plot each date minus the previous one, then the last date"
+                             " (cumulative) and the linear rate [unit/yr] as the last two panels")
     parser.add_argument("--amp-file", dest="amp_file", default=None,
                         help="Amplitude background for single-band images (band 1 of this ISCE file, same size),"
                              " e.g. merged/interferograms/<pair>/filt_fine.unw for the per-date products")
@@ -112,7 +115,7 @@ if __name__ == "__main__":
     img = isceobj.createImage(); img.load(files[0] + ".xml")
     width, length = img.width, img.length
     ipl, ppc, WIDTH = 20, 30, 30  # imgs/row, px/cm, artboard width
-    n_rows = np.ceil(len(files) / ipl)
+    n_rows = np.ceil((len(files) + (2 if inps.diff else 0)) / ipl)
     # layout [cm]: images of rW x rL in a grid, GAP between them, a label band LAB above each image
     HEAD, MARGIN, GAP, LAB = 1.2, 0.3, 0.12, 0.55
     rW = (WIDTH - 2 * MARGIN - GAP * (ipl - 1)) / ipl
@@ -150,17 +153,19 @@ if __name__ == "__main__":
             out = np.where(v, a, 0).sum(axis=(1, 3)) / np.maximum(n, 1)
         return np.where(n > 0, out, 0).astype(np.float32)
 
-    def render(file, pair):
-        """One image: decimate with numpy, render with mdx (own workdir), save the PNG directly."""
-        png = os.path.join(odir, f"{pair}.png")
-        if os.path.isfile(png) and not inps.redo:
-            return
+    def load(file, phase=True):
+        """Bands of one file, block-averaged to the display size."""
         im = isceobj.createImage(); im.load(file + ".xml")
         w, l, nb = im.width, im.length, max(1, int(getattr(im, "bands", 1) or 1))
         data = np.fromfile(file, dtype=np.float32).reshape(l * nb, w)
         bands = [data[b::nb] for b in range(nb)]
-        bands = [_block(bd, k, phase=(b == len(bands) - 1 and (inps.band == 2 or nb == 1)))
-                 for b, bd in enumerate(bands)]
+        return [_block(bd, k, phase=phase and (b == nb - 1 and (inps.band == 2 or nb == 1)))
+                for b, bd in enumerate(bands)]
+
+    def draw(bands, name):
+        """Render small bands with mdx (own workdir) and save <name>.png."""
+        png = os.path.join(odir, f"{name}.png")
+        nb = len(bands)
         if amp_bg is not None and nb == 1 and amp_bg.shape == bands[0].shape:
             bands = [amp_bg, bands[0]]                     # -> amplitude + phase, drawn like --amp
         if mask is not None:
@@ -170,9 +175,9 @@ if __name__ == "__main__":
         wd = tempfile.mkdtemp(dir=odir, prefix=".mdx_")   # out.ppm is a fixed name: one workdir per image
         f2 = os.path.join(wd, "img")
         small.tofile(f2)
-        if inps.band == 1 and not (amp_bg is not None and len(bands) == 2):
+        if len(bands) == 1:
             cmd = f"mdx {f2} -s {w2} -ch1 -r4 -wrap {inps.wrap} -addr -{inps.wrap/2} -cmap CMY -P -workdir {wd}"
-        elif not (inps.overamp or (amp_bg is not None and len(bands) == 2 and nb == 1)):
+        elif not (inps.overamp or nb == 1):
             cmd = f"mdx {f2} -s {w2} -ch2 -r4 -rhdr {w2*4} -wrap {inps.wrap} -addr -{inps.wrap/2} -cmap CMY -P -workdir {wd}"
         else:
             cmd = f"mdx {f2} -s {w2} -amp -r4 -rtlr {w2*4} -CW -unw -r4 -rhdr {w2*4} -wrap {inps.wrap} -addr -{inps.wrap/2} -cmap CMY -P -workdir {wd}"
@@ -181,6 +186,11 @@ if __name__ == "__main__":
         for x in os.listdir(wd):
             os.remove(os.path.join(wd, x))
         os.rmdir(wd)
+
+    def render(file, pair):
+        if os.path.isfile(os.path.join(odir, f"{pair}.png")) and not inps.redo:
+            return
+        draw(load(file), pair)
 
     amp_bg = None
     if inps.amp_file:
@@ -194,13 +204,37 @@ if __name__ == "__main__":
 
     from concurrent.futures import ThreadPoolExecutor
     pairs = [f.split("/")[inps.loc].split(".")[0] for f in files]
-    with ThreadPoolExecutor(inps.nproc) as ex:
-        list(ex.map(render, files, pairs))
+    labels = {}
+    if not inps.diff:
+        with ThreadPoolExecutor(inps.nproc) as ex:
+            list(ex.map(render, files, pairs))
+    else:
+        # dates: real block means (the values are unwrapped), then differences to the previous date
+        from datetime import datetime as _dt
+        with ThreadPoolExecutor(inps.nproc) as ex:
+            stack = np.array([b[0] for b in ex.map(lambda f: load(f, phase=False), files)])
+        t = np.array([(_dt.strptime(p[:8], "%Y%m%d") - _dt.strptime(pairs[0][:8], "%Y%m%d")).days / 365.25 for p in pairs])
+        ok = np.any(stack != 0, axis=0)                   # pixels with data on some date
+        items = [(pairs[0], np.where(ok, 1e-6, 0).astype(np.float32))]
+        for i in range(1, len(pairs)):
+            d = stack[i] - stack[i - 1]
+            items.append((pairs[i], np.where(ok & (d == 0), 1e-6, np.where(ok, d, 0)).astype(np.float32)))
+        cum = stack[-1]
+        a = stack.reshape(len(t), -1)
+        tc = t - t.mean()
+        rate = ((tc[:, None] * (a - a.mean(axis=0))).sum(axis=0) / (tc ** 2).sum()).reshape(cum.shape)
+        items += [("cumulative", np.where(ok, cum, 0).astype(np.float32)),
+                  ("rate", np.where(ok, rate, 0).astype(np.float32))]
+        labels = {pairs[0]: f"{pairs[0]}|(reference)", "cumulative": f"cumulative|{pairs[-1]}",
+                  "rate": f"linear rate|[{inps.unit}/yr]"}
+        pairs = pairs + ["cumulative", "rate"]
+        with ThreadPoolExecutor(inps.nproc) as ex:
+            list(ex.map(lambda it: draw([it[1]], it[0]), items))
 
     for i, pair in enumerate(pairs):
         mdate, sdate, date = None, None, None
         if "_" in pair: mdate, sdate = pair.split("_")
-        else: date = pair
+        else: date = labels.get(pair, pair)
 
         # collage SVG entries
         if inps.collage:
@@ -208,12 +242,13 @@ if __name__ == "__main__":
             jj = i + 1 - (ii - 1) * ipl
             x0 = MARGIN + PITCH_X * (jj - 1)
             y0 = HEAD + PITCH_Y * (ii - 1) + LAB          # image top; its label is in the band above
-            name = f"{mdate}_{sdate}" if mdate else date
+            name = f"{mdate}_{sdate}" if mdate else pair
             hit = [(c, i) for i, (n, c, _) in enumerate(groups) if name in n]
             font_color = f";fill:{hit[-1][0]}" if hit else ""
             add_box = "".join(f'<rect fill="none" stroke="{c}" stroke-width="{2 + i}" x="{x0}cm" y="{y0}cm" width="{rW}cm" height="{rL}cm"/>'
                               for c, i in hit)
-            label = (f'<tspan x="{x0}cm" dy="0">{mdate}_</tspan><tspan x="{x0}cm" dy="1em">{sdate}</tspan>' if mdate else date)
+            two = (f"{mdate}_", sdate) if mdate else (date.split("|") + [""])[:2]
+            label = f'<tspan x="{x0}cm" dy="0">{two[0]}</tspan><tspan x="{x0}cm" dy="1em">{two[1]}</tspan>'
             img_svg = f'''<image xlink:href="{pair}.png" x="{x0}cm" y="{y0}cm" width="{rW}cm" height="{rL}cm"/>
                 {add_box}
                 <text x="{x0}cm" y="{y0-LAB+0.22}cm" style="font-family:Times;font-size:8px{font_color};">{label}</text>'''
@@ -229,7 +264,7 @@ if __name__ == "__main__":
     runCmd(f"{IM} {os.path.join(wd, 'out.ppm')} {os.path.join(odir, cbar)}")
     runCmd(f"rm -r {wd}")
     cbx, cbw = WIDTH - 5.0, 4.0
-    svg += f'''<text x="0.3cm" y="0.6cm" style="font-family:Times;font-size:12px;">{inps.input}  ({len(files)} images)</text>''' + "".join(
+    svg += f'''<text x="0.3cm" y="0.6cm" style="font-family:Times;font-size:12px;">{inps.input}  ({len(files)} images{"; each date minus the previous; last two: cumulative, linear rate" if inps.diff else ""})</text>''' + "".join(
         f'<text x="{10 + 6*i}cm" y="0.6cm" style="font-family:Times;font-size:12px;fill:{c};">&#9633; {lab} ({len({x.replace("-", "_") for x in n})})</text>'
         for i, (n, c, lab) in enumerate(groups)) + f'''
         <image xlink:href="{cbar}" x="{cbx}cm" y="0.2cm" width="{cbw}cm" height="0.4cm" preserveAspectRatio="none"/>
