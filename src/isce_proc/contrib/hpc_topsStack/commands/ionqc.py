@@ -169,6 +169,8 @@ def _semivar(phi, lags):
 def _geom(c, name, shape):
     from skimage.transform import resize
     f = os.path.join(c.stack, 'merged', 'geom_reference', f'{name}.rdr')
+    if not os.path.isfile(f + '.xml'):                          # exported stacks: geom_reference/ on top
+        f = os.path.join(c.stack, 'geom_reference', f'{name}.rdr')
     w, l = _size(f + '.xml')
     return resize(np.fromfile(f, dtype=np.float64).reshape(l, w), shape, order=1,
                   preserve_range=True, anti_aliasing=False)
