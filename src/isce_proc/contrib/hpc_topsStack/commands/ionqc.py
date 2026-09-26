@@ -13,7 +13,9 @@ closure (after step 23, default) for every triangle of pairs (a,b), (b,c), (a,c)
         (worst pair first; its triangles are then ignored when scoring the others).
 --unw   (after step 23) semivariogram gamma(r) = 0.5 E[(phi(x+r) - phi(x))^2] of the interferogram
         (merged/interferograms/<pair>/filt_fine.unw, pixels with filt_fine.cor > 0.5 in the mask)
-        at r = 10/30/50 km, ratio (unw - ion) / unw. > 1: the correction adds variance.
+        at r = 10, 25, 50, 100, 200 km (about log-spaced), ratio (unw - ion) / unw; the decision uses
+        100 km, where the filtered ionosphere (filtIon windows ~70-150 km) has its power.
+        > 1: the correction adds variance.
 
 Exclude a pair when closure or --raw flags it and the correction does not help (ratio >= 1 or not
 tested), and only if the network stays connected without it (union-find over the dates, worst pair
@@ -224,8 +226,8 @@ def apply_exc(c, exc):
 
 # ---------------------------------------------------------------- driver
 def ionqc(c, raw=False, closure_test=True, unw=False, apply=False, nproc=8, step=2,
-          floor=3.0, nmad=6.0, ratio_max=1.2, raw_floor=50.0, raw_nmad=10.0,
-          dists=(10, 30, 50), sample=0):
+          floor=3.0, nmad=6.0, ratio_max=1.5, raw_floor=50.0, raw_nmad=10.0,
+          dists=(10, 25, 50, 100, 200), dist_test=100, sample=0):
     name = 'filt.ion' if closure_test or unw else 'raw_no_projection.ion'
     files = sorted(glob.glob(os.path.join(c.stack, 'ion', '*_*', 'ion_cal', name)))
     pairs = sorted(f.split(os.sep)[-3] for f in files if PAIR.match(f.split(os.sep)[-3]))
@@ -263,14 +265,14 @@ def ionqc(c, raw=False, closure_test=True, unw=False, apply=False, nproc=8, step
         print(f'correction test on the interferograms of {len(sub)} pairs ...', flush=True)
         cr, sign, sp = correction(c, sub, shape, dists, nproc)
         stats.append(f'correction test on {len(cr)} interferograms (pixel {sp[0]:.2f} x {sp[1]:.2f} km): '
-                     f'ratio (unw - ion)/unw at {dists} km, threshold {ratio_max} at {dists[-1]} km; '
+                     f'ratio (unw - ion)/unw at {dists} km, decision at {dist_test} km (list > {ratio_max}); '
                      f'sign check: unw - ion better than unw + ion in {sign[0]}/{sign[1]}')
 
     rows, bad, check = [], [], []
     for p in pairs:
         s_, n = clo[p]
         r = cr.get(p)
-        r50 = r[-1] if r else np.nan
+        r50 = r[dists.index(dist_test)] if r else np.nan
         helps = np.isfinite(r50) and r50 < 1.0
         why = ([f'raw {rs[p]:.0f}'] if p in raw_bad else []) + ([f'closure {s_:.1f}'] if p in clo_bad else [])
         if np.isfinite(r50) and r50 > ratio_max:
