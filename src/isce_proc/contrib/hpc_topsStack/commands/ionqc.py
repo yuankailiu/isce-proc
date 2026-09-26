@@ -300,6 +300,7 @@ def ionqc(c, raw=False, closure_test=True, unw=False, apply=False, nproc=8, step
             keep_bridge.append(p)
 
     stamp = f'{datetime.now():%Y-%m-%d}'
+    os.makedirs(os.path.join(c.stack, 'logs'), exist_ok=True)
     head = ['pair', 'dt_days', 'raw_spread_rad', 'n_triangles', 'closure_rms_rad'] + [f'var_ratio_{d}km' for d in dists] + ['flag']
     with open(os.path.join(c.stack, 'logs', f'ionqc_{stamp}.csv'), 'w', newline='') as f:
         csv.writer(f).writerows([head] + rows)
