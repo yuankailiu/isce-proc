@@ -132,15 +132,15 @@ rows with their log lines. At the end you get one mail with the summary of all s
 ### 7b. Ionosphere check, then steps 24-28 (ionosphere only)
 
 ```bash
-topsstack.py ionqc ChileSenAT120.txt --raw --unw        # ~1 min; logs/ionqc_<date>.txt/.csv
-topsstack.py plot  ChileSenAT120.txt ion                # pic/img_ion_amp/collage.html (red: diff. starting ranges)
-topsstack.py ionqc ChileSenAT120.txt --raw --unw --apply   # add the bad pairs to --exc_pair of steps 24/26
+topsstack.py ionqc ChileSenAT120.txt --raw --unw        # ~1 min -> logs/ionqc_<date>.txt/.csv
+topsstack.py plot  ChileSenAT120.txt                    # ion figures, flagged pairs boxed (below)
+topsstack.py ionqc ChileSenAT120.txt --raw --unw --apply   # add "exclude" pairs to --exc_pair of steps 24/26
 topsstack.py submit ChileSenAT120.txt -s 24
 ```
 
 `ionqc` excludes a pair when its raw ionosphere has blocks (unwrapping errors) or it fails loop
-closure, and the correction does not help its interferogram; the network stays connected. Pairs
-to look at are listed as "check by eye". Details: `commands/ionqc.py`.
+closure, and the correction does not help its interferogram; the network stays connected. Lists:
+`logs/ionqc_exclude.txt`, `logs/ionqc_check.txt` (look at these). Details: `commands/ionqc.py`.
 
 ### 8. Free disk space (optional, any time)
 
@@ -156,12 +156,28 @@ unfinished rows. The SLC zips are read until step 17 with ionosphere (step 13 wi
 ### 9. After the last step
 
 ```bash
+topsstack.py plot   ChileSenAT120.txt                   # = plot ... ion: all ionosphere figures
 topsstack.py report ChileSenAT120.txt                   # time, CPU, memory, cost, size per step
-topsstack.py plot   ChileSenAT120.txt ion               # ion pairs + dates; also: unw, baselines, network
 topsstack.py export ChileSenAT120.txt --dry-run         # then without --dry-run (needs hpc.exportDir)
 ```
 
-Look at `pic/*/collage.html` (ionosphere per pair and per date) before MintPy.
+## Figures (`topsstack.py plot TEMPLATE [ion|unw|baselines|network]`)
+
+Open `pic/<name>/collage.html` in a browser. Images are skipped if their PNG exists; add `--redo` to
+redraw (other options after the target go to `scripts/plot_imgs.py`, e.g. `-n 16` threads).
+
+| target | `pic/` | content | colorbar cycle |
+|---|---|---|---|
+| `ion` (default) | `img_ion_amp` | ionosphere per pair, `ion/*/ion_cal/filt.ion` | 2π rad |
+| | `img_ion_dates` | ionosphere per date (step 24) | 2π rad |
+| | `img_azshiftDate` | azimuth shift per date (step 26) | 0.00628 single-look lines (~9 cm) |
+| | `img_ionRampDate` | burst phase ramp per date (step 28) | 0.0628 rad |
+| `unw` | `img_unw_amp` | all interferograms (many; only on request) | 2π rad |
+| `baselines` | `pic/` | perpendicular-baseline history | |
+| `network` | `pic/` | networks by starting range / IPF version | |
+
+Boxes on the pair figures: blue = `pairs_diff_starting_ranges.txt`, orange = ionqc check,
+red = ionqc exclude (after `ionqc`). Own lists: `plot TEMPLATE ion --mark FILE:COLOR:LABEL`.
 
 ## The template
 
