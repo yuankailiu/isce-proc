@@ -60,7 +60,15 @@ def _mask(c, p, step=1):
     if os.path.isfile(f):
         return _band(f, 1, 1, step, np.int8) == -1
     cor = _band(os.path.join(d, 'raw_no_projection.cor'), 2, 2, step)
-    return np.nan_to_num(cor) > 0.75
+    m = np.nan_to_num(cor) > 0.75
+    for g in ('merged/geom_reference', 'geom_reference'):   # water body at the ion looks: 0 = land
+        f = os.path.join(c.stack, g, 'waterBody_ionlk.rdr')
+        if os.path.isfile(f):
+            w = _band(f, 1, 1, step, np.int8)
+            if w.shape == m.shape:
+                m &= (w == 0)
+            break
+    return m
 
 
 def _ion(c, p, name='filt.ion', step=1):
@@ -219,7 +227,12 @@ def _exc_now(c):
     run = sorted(glob.glob(os.path.join(c.stack, 'run_files', 'run_[0-9][0-9]_invertIon')))
     if not run:
         return [], None
-    m = re.search(r'--exc_pair((?:\s+\d{8}_\d{8})+)', open(run[0]).read())
+    txt = '\n'.join(l for l in open(run[0]) if l.strip() and not l.lstrip().startswith('#'))
+    m = re.search(r'--exc_pair((?:\s+\d{8}_\d{8})+)', txt)
+    d = re.search(r'--exc_date((?:\s+\d{8})+)', txt)
+    if d:
+        print(f'note: {os.path.basename(run[0])} also has --exc_date {d.group(1).strip()}: those epochs get no '
+              'ionospheric correction at all; prefer excluding pairs')
     return (m.group(1).split() if m else []), run[0]
 
 
@@ -229,10 +242,10 @@ def apply_exc(c, exc):
     for f in sorted(glob.glob(os.path.join(c.stack, 'run_files', 'run_[0-9][0-9]_invertIon*'))):
         if not re.fullmatch(r'run_\d\d_invertIon(Shift)?', os.path.basename(f)):
             continue
-        s = re.sub(r'\s+--exc_pair(\s+\d{8}_\d{8})+', '', open(f).read().rstrip('\n'))
-        if exc:
-            s += ' --exc_pair ' + ' '.join(sorted(exc))
-        open(f, 'w').write(s + '\n')
+        lines = open(f).read().splitlines()
+        i = next(k for k, l in enumerate(lines) if l.strip() and not l.lstrip().startswith('#'))   # the command
+        lines[i] = re.sub(r'\s+--exc_pair(\s+\d{8}_\d{8})+', '', lines[i]) + (' --exc_pair ' + ' '.join(sorted(exc)) if exc else '')
+        open(f, 'w').write('\n'.join(lines) + '\n')
         done.append(os.path.basename(f))
     return done
 
@@ -315,6 +328,12 @@ def ionqc(c, raw=False, closure_test=True, unw=False, apply=False, nproc=8, step
         else:
             keep_bridge.append(p)
 
+    # pairs closure cannot validate: no triangle, or a bridge of the network in use (removing it splits
+    # the epochs). There the pair IS the network's prediction; judge them with interferograms that span
+    # them, and do not restore an excluded one on closure alone (a120_south 2026-09-22).
+    used = [q for q in pairs if q not in exc]
+    bridges = [q for q in used if not _connected([x for x in used if x != q])] if len(used) < 3000 else []
+    weak = sorted(set(bridges) | {q for q in pairs if clo[q][1] == 0})
     stamp = f'{datetime.now():%Y-%m-%d}'
     os.makedirs(os.path.join(c.stack, 'logs'), exist_ok=True)
     head = ['pair', 'dt_days', 'raw_spread_rad', 'n_triangles', 'closure_rms_rad'] + [f'var_ratio_{d}km' for d in dists] + ['flag']
@@ -328,6 +347,8 @@ def ionqc(c, raw=False, closure_test=True, unw=False, apply=False, nproc=8, step
                          + f'  {r[-1] or "(already excluded, not flagged now)"}')
     new = sorted(set(exc) - set(old))
     lines += ['', f'exclude ({len(exc)}): {" ".join(sorted(exc)) or "none"}',
+              f'not validated by closure ({len(weak)}: no triangle or a network bridge; excluded ones among them '
+              f'stay excluded): {" ".join(weak) or "none"}',
               f'  already in {os.path.basename(run24) if run24 else "run_24"}: {" ".join(old) or "none"}; new: {" ".join(new) or "none"}',
               f'check by eye ({len(check)}): {" ".join(check) or "none"}']
     if keep_bridge:
@@ -339,7 +360,7 @@ def ionqc(c, raw=False, closure_test=True, unw=False, apply=False, nproc=8, step
     else:
         lines.append('write it with --apply (then re-run from step 24)')
     txt = '\n'.join(lines)
-    for name, lst in (('exclude', exc), ('check', check)):          # latest lists, e.g. for plot --mark
+    for name, lst in (('exclude', exc), ('check', check), ('unvalidated', weak)):          # latest lists, e.g. for plot --mark
         open(os.path.join(c.stack, 'logs', f'ionqc_{name}.txt'), 'w').write('\n'.join(sorted(lst)) + '\n')
     open(os.path.join(c.stack, 'logs', f'ionqc_{stamp}.txt'), 'w').write(txt + '\n')
     with _log(c, 'ionqc') as log:
