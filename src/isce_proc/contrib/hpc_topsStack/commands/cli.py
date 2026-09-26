@@ -10,7 +10,7 @@ import sys
 from contextlib import contextmanager
 from pathlib import Path
 
-from commands import config, data, export, plot, report, stack
+from commands import config, data, export, ionqc, plot, report, stack
 
 SCRIPTS = Path(__file__).resolve().parents[1] / 'scripts'
 
@@ -33,6 +33,7 @@ EXAMPLE = """examples (from the stack directory, e.g. chile/a076/hpc_topsStack):
   topsstack.py clean  ChileSenAT076.txt                  # kill-after table for this stack
   topsstack.py clean  ChileSenAT076.txt esd coreg_overlap --delete
   topsstack.py report ChileSenAT076.txt                  # time/CPU/memory/cost/size per step
+  topsstack.py ionqc  ChileSenAT076.txt --unw            # bad ion pairs after step 23 (--apply: exclude)
   topsstack.py plot   ChileSenAT076.txt ion              # or unw, baselines, network
   topsstack.py export ChileSenAT076.txt --dry-run        # copy to hpc.exportDir
 """
@@ -149,6 +150,19 @@ def cmd_export(c, extra):
     return export.export(c, dry_run=a.dry_run, nproc=a.nproc)
 
 
+def cmd_ionqc(c, extra):
+    ap = argparse.ArgumentParser(prog='topsstack.py ionqc TEMPLATE')
+    ap.add_argument('--unw', action='store_true', help='also test the correction on the interferograms (slower)')
+    ap.add_argument('--sample', type=int, default=0, help='--unw only on the flagged pairs + this many random ones; 0: all pairs (default)')
+    ap.add_argument('--apply', action='store_true', help='write the suggested --exc_pair into run_24/run_26')
+    ap.add_argument('-n', '--nproc', type=int, default=8)
+    ap.add_argument('--floor', type=float, default=3.0, help='minimum closure threshold [rad] (default: %(default)s)')
+    ap.add_argument('--nmad', type=float, default=6.0, help='closure threshold = median + NMAD * MAD (default: %(default)s)')
+    ap.add_argument('--ratio', type=float, default=1.2, help='max variance ratio after/before at 50 km (default: %(default)s)')
+    a = ap.parse_args(extra)
+    return ionqc.ionqc(c, unw=a.unw, apply=a.apply, nproc=a.nproc, floor=a.floor, nmad=a.nmad, ratio_max=a.ratio, sample=a.sample)
+
+
 def cmd_plot(c, extra):
     if not extra:
         sys.exit('topsstack.py plot TEMPLATE {ion,unw,baselines,network} [tool options]')
@@ -168,6 +182,7 @@ COMMANDS = {
     'status': (cmd_status, 'check outputs per row, optionally rerun bad rows (check_topsStack.py)'),
     'clean':  (cmd_clean,  'delete intermediate files after their last reader (clean_topsStack.py)'),
     'report': (cmd_report, 'per-step time, CPU, memory, cost, disk use (sacct) -> logs/report_<date>.*'),
+    'ionqc':  (cmd_ionqc,  'flag bad ionosphere pairs (loop closure; --unw: correction test) before step 24'),
     'plot':   (cmd_plot,   'quick-look figures into pic/: ion, unw, baselines, network'),
     'export': (cmd_export, 'copy products and records to hpc.exportDir (rsync; --dry-run)'),
 }

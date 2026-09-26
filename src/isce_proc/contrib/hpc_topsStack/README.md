@@ -190,6 +190,11 @@ Always look at the ionosphere figures before MintPy.
 - Steps 25–28 estimate the azimuth phase ramp per burst caused by the ionospheric azimuth shift
   (PR #600). They need ESD applied during coregistration: step 27 subtracts the ESD-type part of the
   swath-mean shift, which ESD has already corrected. They do not read the ESD files themselves.
+- After step 23, before step 24: `topsstack.py ionqc TEMPLATE --unw` scores every ion pair by loop
+  closure (triangles (a,b)+(b,c)-(a,c), attributed greedily) and by the semivariogram of the
+  interferogram at 10/30/50 km before/after subtracting the ionosphere. Pairs that fail closure and
+  are not helped by the correction are suggested for `--exc_pair` (network kept connected);
+  `--apply` writes them into run_24/run_26. ~30 s on 1056 pairs (a076). Output: `logs/ionqc_<date>.*`.
 - Mask unwrapping errors before filtering: set `ion.maskFile` (e.g. from `otsu_masking.py`),
   re-run `stack --ion-config`, then re-run from step 23.
 
