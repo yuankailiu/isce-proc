@@ -52,16 +52,27 @@ def export(c, dry_run=False, nproc=4):
     def run(job):
         name, cmd = job
         r = subprocess.run(cmd, cwd=c.stack, capture_output=True, text=True)
-        moved = next((l.split(':', 1)[1].strip() for l in r.stdout.splitlines()
-                      if l.startswith('Total transferred file size')), '?')
-        return name, r.returncode, moved, r.stderr.strip()[-300:]
+        stat = dict(l.split(':', 1) for l in r.stdout.splitlines() if ':' in l)
+        num = lambda k: int(stat.get(k, '0').split()[0].replace(',', '') or 0)
+        return name, r.returncode, num('Total transferred file size'), num('Total file size'), r.stderr.strip()[-300:]
+
+    def human(n):
+        for u in ('B', 'KB', 'MB', 'GB', 'TB'):
+            if n < 1024 or u == 'TB':
+                return f'{n:.1f} {u}' if u != 'B' else f'{n} B'
+            n /= 1024
 
     with _log(c, 'export') as log, ThreadPoolExecutor(nproc) as ex:
         log.write(f'## export -> {target} dry_run={dry_run}\n')
-        bad = 0
-        for name, rc, moved, err in ex.map(run, jobs):
-            print(f'  {name:32s} rc={rc} transferred {moved}' + (f'  {err}' if rc else ''))
-            log.write(f'{name} rc={rc} {moved}\n')
+        bad, moved_all, size_all = 0, 0, 0
+        print(f'  {"item":32s} {"status":8s} {"to copy":>10s} {"total":>10s}')
+        for name, rc, moved, size, err in ex.map(run, jobs):
+            status = 'ok' if rc == 0 else f'rsync {rc}'           # rsync exit code: 0 = success
+            print(f'  {name:32s} {status:8s} {human(moved):>10s} {human(size):>10s}' + (f'  {err}' if rc else ''))
+            log.write(f'{name} rc={rc} copy={moved} total={size}\n')
             bad += rc != 0
-    print(f'{"dry run: " if dry_run else ""}{len(jobs)} items -> {target}; {bad} failed')
+            moved_all += moved
+            size_all += size
+    print(f'{"dry run: " if dry_run else ""}{len(jobs)} items -> {target}: {human(moved_all)} to copy '
+          f'of {human(size_all)} in total; {bad} failed')
     return 1 if bad else 0

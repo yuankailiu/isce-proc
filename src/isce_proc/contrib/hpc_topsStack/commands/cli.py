@@ -195,6 +195,26 @@ COMMANDS = {
 }
 
 
+SCRIPT_OF = {'status': 'check_topsStack', 'clean': 'clean_topsStack', 'jobs': 'write_slurmJobs'}
+
+
+def _help(cmd):
+    print(f'topsstack.py {cmd} TEMPLATE [options]: {COMMANDS[cmd][1]}\n')
+    if cmd in SCRIPT_OF:                                   # options go to this script
+        try:
+            _run_script_main(SCRIPT_OF[cmd], ['-h'])
+        except SystemExit:
+            pass
+        return 0
+    try:
+        COMMANDS[cmd][0](None, ['-h'])                     # commands with their own argparse print and exit
+    except SystemExit:
+        pass
+    except Exception:
+        print('options after TEMPLATE are passed to the underlying tool; see README.md')
+    return 0
+
+
 def main(iargs=None):
     ap = argparse.ArgumentParser(prog='topsstack.py', description=__doc__, epilog=EXAMPLE,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -203,7 +223,10 @@ def main(iargs=None):
         p = sub.add_parser(name, help=helptext, description=helptext, add_help=False)
         p.add_argument('template', help='track template, e.g. ChileSenAT076.txt')
         p.add_argument('extra', nargs=argparse.REMAINDER, help='options passed to the underlying tool')
-    args = ap.parse_args(iargs)
+    argv = sys.argv[1:] if iargs is None else list(iargs)
+    if len(argv) >= 2 and argv[0] in COMMANDS and argv[1] in ('-h', '--help'):
+        return _help(argv[0])                              # topsstack.py CMD -h: the command's own options
+    args = ap.parse_args(argv)
     c = config.load(args.template)
     rc = COMMANDS[args.cmd][0](c, args.extra)
     return rc if isinstance(rc, int) else 0
