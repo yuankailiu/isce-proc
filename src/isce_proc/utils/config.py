@@ -88,7 +88,7 @@ hpc.account             = auto                       #Slurm account, auto for si
 hpc.mail                = auto                       #mail address, auto for $USER@caltech.edu
 hpc.ompTopo             = auto                       #OMP threads per process in run_01, auto for 4
 hpc.clean               = auto                       #[yes / no], activate the deletion lines in the jobs, auto for no
-hpc.gate                = auto                       #[yes / no], check outputs (and rerun bad rows) between steps, auto for no
+hpc.gate                = auto                       #[yes / no], check outputs (and rerun bad rows) between steps; mail only on a stop and at the end, auto for yes
 hpc.gateRetries         = auto                       #reruns per step by the gate before it stops the chain, auto for 2
 hpc.gpuType             = auto                       #GPU type for GPU steps (isce.useGPU = yes), auto for v100
 hpc.exportDir           = auto                       #target of `topsstack.py export`, auto for none
@@ -169,7 +169,7 @@ AUTO_DICT = {
     'hpc.mail'                : None,
     'hpc.ompTopo'             : 4,
     'hpc.clean'               : False,
-    'hpc.gate'                : False,
+    'hpc.gate'                : True,
     'hpc.gateRetries'         : 2,
     'hpc.gpuType'             : 'v100',
     'hpc.exportDir'           : None,

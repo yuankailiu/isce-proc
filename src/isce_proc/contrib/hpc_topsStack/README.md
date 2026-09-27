@@ -57,7 +57,7 @@ template name gives the orbit and direction (`...SenAT120` = ascending, relative
 (`asf.*`, `dem.*`, `select.*`, `ion.*`, `hpc.*`, table below) are optional. Useful ones:
 
 ```
-hpc.gate      = yes        # check outputs between steps and rerun bad rows (recommended)
+hpc.gate      = no         # only to turn off the gate (default yes: checks between steps, mail only on a stop and at the end)
 asf.start     = 2014-10-01
 ```
 
@@ -191,7 +191,7 @@ red = ionqc exclude (after `ionqc`). Own lists: `plot TEMPLATE ion --mark FILE:C
 | `dem.*` | `dir snwe buffer waterBody` | integer box = bounding box + 1° |
 | `select.*` | `southNorth minAcq numConnections bridge` | S/N from the bounding box |
 | `ion.*` | `wbdFile maskFile iteration fill swathAlign burstRampMask` | water body next to `isce.demFile`, same box; 5 iterations; fill nearest; no swath_align |
-| `hpc.*` | `track account mail ompTopo clean gate gateRetries gpuType exportDir costPerCpuHour` | `a076`, `simonsgroup`, `$USER@caltech.edu`, gate off, 2 retries, v100 |
+| `hpc.*` | `track account mail ompTopo clean gate gateRetries gpuType exportDir costPerCpuHour` | `a076`, `simonsgroup`, `$USER@caltech.edu`, gate on, 2 retries, v100 |
 
 ## How the chain is protected
 
