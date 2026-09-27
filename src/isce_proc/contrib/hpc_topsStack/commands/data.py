@@ -216,10 +216,11 @@ def download_slurm(c, n, flags):
 #SBATCH --array=0-{n - 1}
 #SBATCH --partition=expansion
 #SBATCH -c 1
-#SBATCH --mem=4G
+#SBATCH --mem=16G
 #SBATCH -t 24:00:00
 #SBATCH --output={c.data}/download-%A_%a.out
-# network-bound: 1 CPU per task is enough (billing is per allocated CPU)
+# network-bound: 1 CPU is enough; 16G because zip writes fill the page cache, which counts toward
+# the job memory limit (4G: OOM-killed at 100 MB RSS, 2026-09-27)
 # one shard per task; resumable: re-submit the same file to continue
 {sys.executable} {TOPSSTACK} download {c.template} --shard ${{SLURM_ARRAY_TASK_ID}}/{n} {' '.join(flags)}
 """)
