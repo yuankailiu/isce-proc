@@ -77,6 +77,8 @@ topsstack.py download ChileSenAT120.txt --verify     # CRC check of every zip (o
 ```
 
 Re-run `download --slurm 8` if some tasks ended early; it continues where it stopped.
+`download` refuses to start if `asf.*` (or the template, for a data dir shared by several stacks)
+changed since the last `search` (`../data/search_params.txt`). Each task uses 1 CPU.
 
 ### 3. Look at the SLCs, drop the unusable ones
 

@@ -46,6 +46,12 @@ def _session():
     return asf.ASFSession().auth_with_creds(login, password)
 
 
+def _search_key(c):
+    """The asf.* settings a search_results.csv was made with (checked by `download`)."""
+    return (f'wkt={c.asf.wkt} orbit={c.asf.relativeOrbit} {c.asf.flightDirection} '
+            f'platforms={",".join(c.asf.platforms)} {c.asf.start}..{c.asf.end} template={os.path.abspath(c.template)}')
+
+
 def search(c, extra=()):
     """ASF search from asf.*; write search_results.csv/kml in the data dir."""
     import asf_search as asf
@@ -62,6 +68,8 @@ def search(c, extra=()):
         f.writelines(res.csv())
     with open(os.path.join(c.data, 'search_results.kml'), 'w') as f:
         f.writelines(res.kml())
+    with open(os.path.join(c.data, 'search_params.txt'), 'w') as f:
+        f.write(_search_key(c) + '\n')
     gb = sum(r.properties.get('bytes') or 0 for r in res) / 1e9
     with _log(c, 'search') as log:
         log.write(f'## {datetime.now():%F %T} {len(res)} SLC products, {gb:.0f} GB; wkt={c.asf.wkt} '
@@ -85,6 +93,11 @@ def _wanted(c, needed):
     f = os.path.join(c.data, 'search_results.csv')
     if not os.path.isfile(f):
         sys.exit(f'{f} not found: run `topsstack.py search` first')
+    k = os.path.join(c.data, 'search_params.txt')              # data dir may be shared by several stacks
+    if os.path.isfile(k) and open(k).read().strip() != _search_key(c):
+        sys.exit(f'search_results.csv is from other asf.* settings or another template:\n'
+                 f'  csv:      {open(k).read().strip()}\n  template: {_search_key(c)}\n'
+                 f'run `topsstack.py search {c.template}` first')
     return sorted({r['Granule Name'] for r in csv.DictReader(open(f))})
 
 
