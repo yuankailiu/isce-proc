@@ -10,6 +10,7 @@ import sys
 from contextlib import contextmanager
 from pathlib import Path
 
+from isce_proc.utils.config import AUTO_DICT
 from commands import config, data, export, ionqc, plot, report, stack
 
 SCRIPTS = Path(__file__).resolve().parents[1] / 'scripts'
@@ -101,9 +102,9 @@ def cmd_download(c, extra):
     ap.add_argument('--needed', action='store_true', help='only the zips the stack VRTs read (reference/, secondarys/)')
     ap.add_argument('--verify', action='store_true', help='also CRC-check complete-size zips; re-download bad ones')
     ap.add_argument('--dry-run', action='store_true', help='only report what would be downloaded')
-    ap.add_argument('--slurm', type=int, metavar='N', help='submit N Slurm array tasks (default asf.shards)', nargs='?', const=0)
+    ap.add_argument('--slurm', type=int, metavar='N', help=f'submit N Slurm array tasks, 1 CPU each (default: asf.shards = {AUTO_DICT["asf.shards"]})', nargs='?', const=0)
     ap.add_argument('--shard', type=str, metavar='I/N', help='this process handles every N-th file from I (used by --slurm)')
-    ap.add_argument('-n', '--nproc', type=int, help='parallel downloads (default asf.processes)')
+    ap.add_argument('-n', '--nproc', type=int, help=f'parallel downloads per process/task (default: asf.processes = {AUTO_DICT["asf.processes"]})')
     a = ap.parse_args(extra)
     if a.slurm is not None:
         flags = [f for f, on in (('--needed', a.needed), ('--verify', a.verify)) if on]
@@ -129,7 +130,8 @@ def cmd_stack(c, extra):
     ap = argparse.ArgumentParser(prog='topsstack.py stack TEMPLATE')
     ap.add_argument('--ion-config', action='store_true', help='set filtIon/burstRampIon config keys from ion.* (idempotent)')
     ap.add_argument('--select-pairs', nargs='*', type=int, metavar=('N', 'BRIDGE'),
-                    help='thin steps 13-16 to N nearest pairs (+ one BRIDGE dates ahead); default select.*')
+                    help='thin steps 13-16 to N nearest pairs (+ one BRIDGE dates ahead) '
+                         f'(default: select.numConnections = {AUTO_DICT["select.numConnections"]}, select.bridge = {AUTO_DICT["select.bridge"]})')
     a, rest = ap.parse_known_args(extra)
     if a.ion_config:
         return stack.ion_config(c)
@@ -159,7 +161,7 @@ def cmd_ionqc(c, extra):
     ap.add_argument('--unw', action='store_true', help='also the correction test on the interferograms')
     ap.add_argument('--sample', type=int, default=0, help='--unw only on the flagged pairs + this many random ones; 0: all pairs (default)')
     ap.add_argument('--apply', action='store_true', help='add the excluded pairs to --exc_pair of run_24/run_26')
-    ap.add_argument('-n', '--nproc', type=int, default=8)
+    ap.add_argument('-n', '--nproc', type=int, default=8, help='parallel processes (default: %(default)s)')
     ap.add_argument('--floor', type=float, default=3.0, help='minimum closure threshold [rad] (default: %(default)s)')
     ap.add_argument('--nmad', type=float, default=6.0, help='closure threshold = median + NMAD * MAD (default: %(default)s)')
     ap.add_argument('--raw-floor', type=float, default=50.0, help='minimum raw-spread threshold [rad] (default: %(default)s)')
@@ -198,6 +200,22 @@ COMMANDS = {
 
 SCRIPT_OF = {'status': 'check_topsStack', 'clean': 'clean_topsStack', 'jobs': 'write_slurmJobs'}
 
+# template keys each command reads (printed with their defaults by `CMD -h`)
+KEYS_OF = {'search': ('asf.',), 'download': ('asf.',), 'inspect': ('asf.dataDir',),
+           'select': ('asf.dataDir', 'select.southNorth', 'select.minAcq'), 'dem': ('dem.', 'isce.demFile'),
+           'stack': ('isce.', 'select.numConnections', 'select.bridge', 'ion.'), 'jobs': ('hpc.',),
+           'submit': ('hpc.gate',), 'report': ('hpc.costPerCpuHour',), 'ionqc': ('isce.paramIonFile',),
+           'plot': ('hpc.track',), 'export': ('hpc.exportDir',), 'show': ('',)}
+
+
+def _keys_help(cmd):
+    keys = [k for k in AUTO_DICT if any(k.startswith(p) for p in KEYS_OF.get(cmd, ()))]
+    if keys:
+        print(f'\ntemplate keys read (default; None = derived from isce.* or the template name, see `show`):')
+        w = max(map(len, keys))
+        for k in keys:
+            print(f'  {k:<{w}} = {AUTO_DICT[k]}')
+
 
 def _help(cmd):
     print(f'topsstack.py {cmd} TEMPLATE [options]: {COMMANDS[cmd][1]}\n')
@@ -206,13 +224,22 @@ def _help(cmd):
             _run_script_main(SCRIPT_OF[cmd], ['-h'])
         except SystemExit:
             pass
-        return 0
-    try:
-        COMMANDS[cmd][0](None, ['-h'])                     # commands with their own argparse print and exit
-    except SystemExit:
-        pass
-    except Exception:
-        print('options after TEMPLATE are passed to the underlying tool; see README.md')
+    elif cmd == 'submit':                                  # the options are in the script header
+        sh = SCRIPTS / 'submit_chained_dependencies.sh'
+        head = []
+        for l in open(sh).readlines()[1:]:
+            if not l.startswith('#') or l.startswith('# TODO'):
+                break
+            head.append(l[1:])
+        print(''.join(head).rstrip())
+    else:
+        try:
+            COMMANDS[cmd][0](None, ['-h'])                 # commands with their own argparse print and exit
+        except SystemExit:
+            pass
+        except Exception:
+            print('options after TEMPLATE are passed to the underlying tool; see README.md')
+    _keys_help(cmd)
     return 0
 
 

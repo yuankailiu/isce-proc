@@ -200,10 +200,11 @@ def download_slurm(c, n, flags):
 #SBATCH -J download_{c.hpc.track}
 #SBATCH --array=0-{n - 1}
 #SBATCH --partition=expansion
-#SBATCH -c 4
-#SBATCH --mem=16G
+#SBATCH -c 1
+#SBATCH --mem=4G
 #SBATCH -t 24:00:00
 #SBATCH --output={c.data}/download-%A_%a.out
+# network-bound: 1 CPU per task is enough (billing is per allocated CPU)
 # one shard per task; resumable: re-submit the same file to continue
 {sys.executable} {TOPSSTACK} download {c.template} --shard ${{SLURM_ARRAY_TASK_ID}}/{n} {' '.join(flags)}
 """)
