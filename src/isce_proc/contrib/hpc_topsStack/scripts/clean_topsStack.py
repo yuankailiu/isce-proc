@@ -20,7 +20,7 @@ import argparse, fnmatch, glob, os, re, stat, sys
 from pathlib import PurePosixPath
 from types import SimpleNamespace
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timedelta
 
 
 def stack_info(root):
@@ -122,19 +122,24 @@ def find(root, patterns, nproc):
     return out
 
 
+REUSE_MAX_AGE = timedelta(hours=24)
+
+
 def from_log(logs, target, root, patterns, nproc):
     """{path: size} from the latest dry-run list of `target` in the logs, re-checked against its patterns."""
-    files, cur = None, False
+    files, cur, when = None, False, None
     for log in logs:                             # oldest first; the last matching block wins
         for line in open(log):
             if line.startswith('## '):
                 w = line.split()
                 cur = w[3] == target and 'delete=False' in w
                 if cur:
-                    files = []
+                    files, when = [], datetime.strptime(f'{w[1]} {w[2]}', '%Y-%m-%d %H:%M:%S')
             elif cur:
                 files.append(line.rstrip('\n'))
-    if files is None:
+    # an empty or old list is not trusted: files may have been made after it (a076, 2026-09-26: a
+    # dry run of 09-23, before step 17 wrote the sub-band SLCs, made --reuse delete 0 of 34.7 TB)
+    if not files or datetime.now() - when > REUSE_MAX_AGE:
         return None
     parts = [PurePosixPath(p).parts for p in patterns]
     def match(f):
@@ -214,7 +219,7 @@ def main():
                     print(f'  {t:16s} NOT deleted: {reason} (use --no-check to override)'); continue
             files = from_log(logs, t, root, pats, args.nproc) if args.reuse else None
             if args.reuse and files is None:
-                print(f'  {t:16s} no dry-run list in {os.path.basename(log)} etc.; searching')
+                print(f'  {t:16s} no non-empty dry-run list from the last 24 h; searching')
             reused = files is not None
             if not reused:
                 files = find(root, pats, args.nproc)
