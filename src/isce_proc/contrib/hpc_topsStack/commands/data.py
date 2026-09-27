@@ -52,6 +52,13 @@ def _search_key(c):
             f'platforms={",".join(c.asf.platforms)} {c.asf.start}..{c.asf.end} template={os.path.abspath(c.template)}')
 
 
+def search_current(c):
+    """True if data/search_results.csv was made from this template's asf.* settings."""
+    k = os.path.join(c.data, 'search_params.txt')              # data dir may be shared by several stacks
+    return (os.path.isfile(os.path.join(c.data, 'search_results.csv')) and os.path.isfile(k)
+            and open(k).read().strip() == _search_key(c))
+
+
 def search(c, extra=()):
     """ASF search from asf.*; write search_results.csv/kml in the data dir."""
     import asf_search as asf
@@ -90,14 +97,9 @@ def _wanted(c, needed):
         if not names:
             sys.exit('--needed: no VRTs reading SLC zips found under reference/ or secondarys/')
         return sorted(names)
+    if not search_current(c):
+        sys.exit(f'search_results.csv missing or from other asf.* settings: run `topsstack.py search {c.template}`')
     f = os.path.join(c.data, 'search_results.csv')
-    if not os.path.isfile(f):
-        sys.exit(f'{f} not found: run `topsstack.py search` first')
-    k = os.path.join(c.data, 'search_params.txt')              # data dir may be shared by several stacks
-    if os.path.isfile(k) and open(k).read().strip() != _search_key(c):
-        sys.exit(f'search_results.csv is from other asf.* settings or another template:\n'
-                 f'  csv:      {open(k).read().strip()}\n  template: {_search_key(c)}\n'
-                 f'run `topsstack.py search {c.template}` first')
     return sorted({r['Granule Name'] for r in csv.DictReader(open(f))})
 
 

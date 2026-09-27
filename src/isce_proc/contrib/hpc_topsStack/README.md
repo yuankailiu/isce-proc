@@ -70,15 +70,16 @@ topsstack.py show ChileSenAT120.txt
 ### 2. Find and download the SLCs
 
 ```bash
-topsstack.py search   ChileSenAT120.txt              # -> ../data/search_results.csv / .kml
+topsstack.py search   ChileSenAT120.txt              # optional: -> ../data/search_results.csv / .kml
 topsstack.py download ChileSenAT120.txt --slurm 8    # 8 Slurm array tasks; watch: squeue -u $USER
 topsstack.py download ChileSenAT120.txt --dry-run    # after they end: should list 0 missing
 topsstack.py download ChileSenAT120.txt --verify     # CRC check of every zip (optional, slow)
 ```
 
 Re-run `download --slurm 8` if some tasks ended early; it continues where it stopped.
-`download` refuses to start if `asf.*` (or the template, for a data dir shared by several stacks)
-changed since the last `search` (`../data/search_params.txt`). Each task uses 1 CPU.
+`download` runs `search` itself if `search_results.csv` is missing or was made from other `asf.*`
+settings or another template (data dir shared by several stacks; see `../data/search_params.txt`).
+Run `search` alone to look at the list first. Each Slurm task uses 1 CPU.
 
 ### 3. Look at the SLCs, drop the unusable ones
 

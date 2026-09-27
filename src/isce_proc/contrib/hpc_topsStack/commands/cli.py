@@ -16,7 +16,7 @@ from commands import config, data, export, ionqc, plot, report, stack
 SCRIPTS = Path(__file__).resolve().parents[1] / 'scripts'
 
 EXAMPLE = """examples (from the stack directory, e.g. chile/a076/hpc_topsStack):
-  topsstack.py search   ChileSenAT076.txt                # ASF search -> data/search_results.*
+  topsstack.py search   ChileSenAT076.txt                # ASF search -> data/search_results.* (download runs it if needed)
   topsstack.py download ChileSenAT076.txt --slurm 8      # 8 parallel shards on compute nodes
   topsstack.py download ChileSenAT076.txt --dry-run      # what is missing
   topsstack.py download ChileSenAT076.txt --needed --verify   # only zips the stack reads, CRC-checked
@@ -106,6 +106,9 @@ def cmd_download(c, extra):
     ap.add_argument('--shard', type=str, metavar='I/N', help='this process handles every N-th file from I (used by --slurm)')
     ap.add_argument('-n', '--nproc', type=int, help=f'parallel downloads per process/task (default: asf.processes = {AUTO_DICT["asf.processes"]})')
     a = ap.parse_args(extra)
+    if not (a.needed or a.shard) and not data.search_current(c):   # once here, never in the Slurm shards
+        print('search_results.csv missing or from other asf.* settings: searching first', flush=True)
+        data.search(c)
     if a.slurm is not None:
         flags = [f for f, on in (('--needed', a.needed), ('--verify', a.verify)) if on]
         flags += ['-n', str(a.nproc)] if a.nproc else []
