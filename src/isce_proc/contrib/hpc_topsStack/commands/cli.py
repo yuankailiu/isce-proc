@@ -228,9 +228,10 @@ def _help(cmd):
         sh = SCRIPTS / 'submit_chained_dependencies.sh'
         head = []
         for l in open(sh).readlines()[1:]:
-            if not l.startswith('#') or l.startswith('# TODO'):
+            if l.startswith('# TODO') or (head and not l.startswith('#')):
                 break
-            head.append(l[1:])
+            if l.startswith('#'):
+                head.append(l[1:])
         print(''.join(head).rstrip())
     else:
         try:
