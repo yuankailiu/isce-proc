@@ -127,7 +127,9 @@ def report(c, extra_ids=()):
         tot['cpu'] += p['cpu']
         tot['alloc'] += p['alloc']
         tot['gpu'] += p['gpu']
-        out_csv.append({'step': step, 'tasks': p['n'], 'states': states, 'start': p['start'], 'end': p['end'],
+        rf = os.path.join(run_files, step)                      # rows = lines of the run file (after thinning)
+        rows_n = sum(1 for l in open(rf) if l.strip()) if os.path.isfile(rf) else ''
+        out_csv.append({'step': step, 'rows': rows_n, 'tasks': p['n'], 'states': states, 'start': p['start'], 'end': p['end'],
                         'wall_span_h': round(span, 3), 'cpu_h': round(p['cpu'] / 3600, 3),
                         'alloc_cpu_h': round(p['alloc'] / 3600, 3), 'gpu_h': round(p['gpu'] / 3600, 3),
                         'cost_usd': round(cost, 2),
