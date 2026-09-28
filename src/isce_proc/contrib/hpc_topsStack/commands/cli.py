@@ -70,7 +70,8 @@ def cmd_jobs(c, extra):
     argv = ['-t', c.hpc.track, '--omp-topo', str(c.hpc.ompTopo), '--account', c.hpc.account, '--mail', c.hpc.mail,
             '--template', c.template]
     argv += ['--clean'] if c.hpc.clean else []
-    argv += ['--gate', str(c.hpc.gateRetries)] if c.hpc.gate else []
+    argv += ['--gate', str(c.hpc.gateRetries), '--gate-steps', c.hpc.gateSteps] if c.hpc.gate else []
+    argv += ['--disk-steps', c.hpc.diskSteps]
     argv += ['--gpu-type', c.hpc.gpuType] + ([] if c.isce.useGPU else ['--no-gpu'])
     with _in(c.stack):
         return _run_script_main('write_slurmJobs', argv + list(extra))
@@ -214,7 +215,7 @@ SCRIPT_OF = {'status': 'check_topsStack', 'clean': 'clean_topsStack', 'jobs': 'w
 KEYS_OF = {'search': ('asf.',), 'download': ('asf.',), 'inspect': ('asf.dataDir',),
            'select': ('asf.dataDir', 'select.southNorth', 'select.minAcq'), 'dem': ('dem.', 'isce.demFile'),
            'stack': ('isce.', 'select.numConnections', 'select.bridge', 'ion.'), 'jobs': ('hpc.',),
-           'submit': ('hpc.gate',), 'report': ('hpc.costPerCpuHour',), 'ionqc': ('isce.paramIonFile',),
+           'submit': ('hpc.gate', 'hpc.gateSteps', 'hpc.diskSteps'), 'report': ('hpc.costPerCpuHour', 'hpc.gpuUnits'), 'ionqc': ('isce.paramIonFile',),
            'plot': ('hpc.track',), 'export': ('hpc.exportDir',), 'show': ('',)}
 
 

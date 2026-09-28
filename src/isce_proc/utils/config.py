@@ -92,7 +92,10 @@ hpc.gate                = auto                       #[yes / no], check outputs 
 hpc.gateRetries         = auto                       #reruns per step by the gate before it stops the chain, auto for 2
 hpc.gpuType             = auto                       #GPU type for GPU steps (isce.useGPU = yes), auto for v100
 hpc.exportDir           = auto                       #target of `topsstack.py export`, auto for none
-hpc.costPerCpuHour      = auto                       #$ per CPU hour for `topsstack.py report`, auto for 0.008
+hpc.costPerCpuHour      = auto                       #$ per compute unit (1 CPU core-hour) for `topsstack.py report`, auto for 0.012 (Resnick tier 1, FY rates)
+hpc.gpuUnits            = auto                       #compute units per GPU hour (V100/P100 10, L40S 61, H100 120, H200 156), auto for 10
+hpc.gateSteps           = auto                       #steps followed by a gate (hpc.gate = yes), or all; the last submitted step always gets one
+hpc.diskSteps           = auto                       #steps followed by a disk_usage job, or all
 """
 
 
@@ -173,5 +176,11 @@ AUTO_DICT = {
     'hpc.gateRetries'         : 2,
     'hpc.gpuType'             : 'v100',
     'hpc.exportDir'           : None,
-    'hpc.costPerCpuHour'      : 0.008,
+    'hpc.costPerCpuHour'      : 0.012,
+    'hpc.gpuUnits'            : 10,
+    # gate after steps that failed before (a076 2026-09: 1, 7, 13, 15, 18-20, 24, 27) or that precede an
+    # expensive step (5->6, 9->10, 16->17, 17->18); the others are short and never failed
+    'hpc.gateSteps'           : '1,5,7,9,13,15,16,17,18,19,20,24,27',
+    # disk_usage after steps that write most of the data
+    'hpc.diskSteps'           : '1,10,12,13,14,15,16,17,18,19,20,22,27,28',
 }

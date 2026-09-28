@@ -75,6 +75,11 @@ def load(template):
     c.hpc.ompTopo = int(c.hpc.ompTopo)
     c.hpc.gateRetries = int(c.hpc.gateRetries)
     c.hpc.costPerCpuHour = float(c.hpc.costPerCpuHour)
+    c.hpc.gpuUnits = float(c.hpc.gpuUnits)
+    for k in ('gateSteps', 'diskSteps'):                    # '1,5,7' -> '1 5 7' (for the submit script); or 'all'
+        v = getattr(c.hpc, k)
+        v = ','.join(v) if isinstance(v, (list, tuple)) else str(v)
+        setattr(c.hpc, k, 'all' if v.strip().lower() == 'all' else ' '.join(str(int(x)) for x in v.replace(',', ' ').split()))
     return c
 
 

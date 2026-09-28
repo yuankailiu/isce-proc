@@ -122,6 +122,11 @@ def cmdLineParse():
                         help = 'write the deletion lines active instead of commented out')
     parser.add_argument('--gate', dest='gate', type=int, default=None, metavar='N',
                         help = 'write gate.job: between steps, check outputs and rerun bad rows up to N times')
+    parser.add_argument('--gate-steps', dest='gate_steps', type=str, default='all', metavar='"1 5 7"',
+                        help = 'with --gate: steps followed by a gate, or all (default: %(default)s); '
+                               'the last submitted step always gets one -> gate_steps.txt')
+    parser.add_argument('--disk-steps', dest='disk_steps', type=str, default='all', metavar='"1 10 12"',
+                        help = 'steps followed by a disk_usage job, or all (default: %(default)s) -> disk_steps.txt')
     parser.add_argument('--gpu-type', dest='gpu_type', type=str, default='v100',
                         help = 'GPU type for steps with Gres > 0 in resources.cfg (default: %(default)s; '
                                'Slurm here requires --gres=gpu:<type>:<count>)')
@@ -280,12 +285,16 @@ def write_job_scripts(inps):
             outf.write(GATE_JOB.format(groupname=inps.account, track=inps.track_no, mail=inps.mail,
                                        retries=inps.gate, python=sys.executable, template=inps.track_template or '',
                                        topsstack=SCRIPT_DIR.parent / 'topsstack.py'))
-        print(f' gate.job (reruns per step: {inps.gate})')
+        with open('gate_steps.txt', 'w') as outf:
+            outf.write(inps.gate_steps.strip() + '\n')
+        print(f' gate.job (reruns per step: {inps.gate}; after steps: {inps.gate_steps} + the last)')
     elif os.path.exists('gate.job'):
         os.remove('gate.job')                            # gate off: plain afterok chain
     with open('total_file_sizes.txt', 'w') as outf:
         outf.write(f'{"Step":35s}{"Step number":12s}{"Job ID":12s}{"Task ID":12s}{"Total size":12s}\n')
-    print(' disk_usage.job')
+    with open('disk_steps.txt', 'w') as outf:
+        outf.write(inps.disk_steps.strip() + '\n')
+    print(f' disk_usage.job (after steps: {inps.disk_steps})')
     for n, line in sorted(deletions.items()):
         print(f'   deletion in run_{n:02d}: {line}')
     print(f'create job scripts for {inps.track_no}.')

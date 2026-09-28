@@ -199,7 +199,7 @@ red = ionqc exclude (after `ionqc`). Own lists: `plot TEMPLATE ion --mark FILE:C
 | `dem.*` | `dir snwe buffer waterBody` | integer box = bounding box + 1° |
 | `select.*` | `southNorth minAcq numConnections bridge` | S/N from the bounding box |
 | `ion.*` | `wbdFile maskFile iteration fill swathAlign burstRampMask` | water body next to `isce.demFile`, same box; 5 iterations; fill nearest; no swath_align |
-| `hpc.*` | `track account mail ompTopo clean gate gateRetries gpuType exportDir costPerCpuHour` | `a076`, `simonsgroup`, `$USER@caltech.edu`, gate on, 2 retries, v100 |
+| `hpc.*` | `track account mail ompTopo clean gate gateRetries gateSteps diskSteps gpuType exportDir costPerCpuHour gpuUnits` | `a076`, `simonsgroup`, `$USER@caltech.edu`, gate on, 2 retries, gates after 1,5,7,9,13,15-20,24,27 + the last, v100, $0.012/unit, 10 units/GPU h |
 
 ## How the chain is protected
 

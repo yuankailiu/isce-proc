@@ -174,11 +174,18 @@ printf "$fmt" "# Stage" "Job ID" "Array ID" "Start (s)" "Finish (s)" "Elapsed (s
 
 ## Record the stack size after each step, outside the chain (nothing depends on it)
 # afterany: runs when the step ends; singleton: one disk_usage job at a time
+# gate_steps.txt / disk_steps.txt (topsstack.py jobs): step numbers, or "all"; missing file = all steps
+listed() { # $1: list file, $2: run file name (run_13_...)
+    [ -f "$1" ] || return 0
+    local n=$((10#$(echo "$2" | cut -d_ -f2)))
+    grep -qw all "$1" && return 0
+    tr ' ,' '\n\n' < "$1" | grep -qx "$n"
+}
 disk_after() { # $1: index of the job just submitted, $2: its job ID
     local this next
     this=$(basename "${sbatch_files[$1]}" | cut -d. -f1)
     next=$(basename "${sbatch_files[$1+1]:-none}" | cut -d. -f1)
-    if [ -f disk_usage.job ] && [ "$this" != "$next" ]; then
+    if [ -f disk_usage.job ] && [ "$this" != "$next" ] && listed disk_steps.txt "$this"; then
         sbatch --parsable --dependency=afterany:"$2",singleton --export=ALL,STEP="$this" disk_usage.job > /dev/null
     fi
 }
@@ -186,8 +193,9 @@ disk_after() { # $1: index of the job just submitted, $2: its job ID
 ### SUBMIT JOBS
 # Without gate.job: every job waits (afterok) for the previous one.
 # With gate.job (topsstack.py jobs, hpc.gate = yes): parts of a step chain with afterany, a gate job
-# runs after all parts of each step (afterany), checks outputs and reruns bad rows, and the next
-# step waits (afterok) for the gate.
+# runs after all parts of each step listed in gate_steps.txt and after the last one (afterany), checks
+# outputs and reruns bad rows, and the next step waits (afterok) for the gate. Steps without a gate:
+# the next step waits (afterok) for all their parts.
 id_logfile="job_id_logfile_${date}.txt"
 echo "IDs of Jobs submitted at: $now" >> "${id_logfile}"
 fmt_id="%-50s %s\\n"   # at least one space: long step names ran into the ID
@@ -217,14 +225,14 @@ for ((i=0;i<${num_file};i++)); do
     step_parts="${step_parts:+${step_parts}:}${ID}"
     next=$(basename "${sbatch_files[i+1]:-none}" | cut -d. -f1)
     if [ "$run_file" != "$next" ]; then                        # last part of this step
-        if $gate; then                                         # after the last step too: final summary mail
+        if $gate && { listed gate_steps.txt "$run_file" || [ "$next" = "none" ]; }; then   # last step: summary mail
             final=""; [ "$next" = "none" ] && final=",GATE_FINAL=1"
             G=$(sbatch --parsable --dependency=afterany:${step_parts} --export=ALL,STEP="${run_file}"${final} gate.job)
             printf "$fmt_id" "gate_${run_file}" "$G" >> "${id_logfile}"
             echo "  gate after ${run_file} - $G"
             dep="afterok:${G}"
-        else
-            dep="afterok:${ID}"
+        else                                                   # no gate: wait for all parts to succeed
+            dep="afterok:${step_parts}"
         fi
         step_parts=""
     fi
