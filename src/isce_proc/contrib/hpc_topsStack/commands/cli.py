@@ -11,7 +11,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from isce_proc.utils.config import AUTO_DICT
-from commands import config, data, export, ionqc, plot, report, stack
+from commands import colors, config, data, export, ionqc, plot, report, stack
 
 SCRIPTS = Path(__file__).resolve().parents[1] / 'scripts'
 
@@ -257,7 +257,11 @@ def main(iargs=None):
         p.add_argument('extra', nargs=argparse.REMAINDER, help='options passed to the underlying tool')
     argv = sys.argv[1:] if iargs is None else list(iargs)
     if len(argv) >= 2 and argv[0] in COMMANDS and argv[1] in ('-h', '--help'):
-        return _help(argv[0])                              # topsstack.py CMD -h: the command's own options
+        with colors.Colored():
+            return _help(argv[0])                          # topsstack.py CMD -h: the command's own options
+    if not argv or argv[0] in ('-h', '--help'):
+        with colors.Colored():
+            ap.parse_args(argv or ['-h'])
     args = ap.parse_args(argv)
     c = config.load(args.template)
     rc = COMMANDS[args.cmd][0](c, args.extra)

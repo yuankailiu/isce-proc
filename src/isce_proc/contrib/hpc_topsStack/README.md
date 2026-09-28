@@ -41,6 +41,9 @@ which topsstack.py   # -> ~/tools/isce-proc-v2/src/isce_proc/contrib/hpc_topsSta
 `ISCE_PROC_HOME` of `config.rc` (the old version) does not matter. Old tracks keep working with their
 own `run_files/` copies. To go back, open a new shell without the `export PATH` line.
 
+`topsstack.py -h` and `topsstack.py CMD -h` list the options and the template keys with their defaults,
+colored on a terminal (Python 3.14 argparse theme); `NO_COLOR=1` turns colors off.
+
 ### 1. Make the stack directory and the template
 
 ```bash
