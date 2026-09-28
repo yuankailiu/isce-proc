@@ -238,6 +238,8 @@ def write_job_scripts(inps):
         # mergeSwathIon.py rows that need them; parts run one after another) and at the array limit
         parts = row_parts(open(step_script).read().splitlines())
         num_sbatch = len(parts)
+        gate_list = None if inps.gate_steps.strip() == 'all' else {int(x) for x in inps.gate_steps.replace(',', ' ').split()}
+        gated = lambda num, last: inps.gate is not None and (last or gate_list is None or int(str(num).split('_')[-1]) in gate_list)
         for i, (row_id0, task_id1) in enumerate(parts):
             # use ROWINDEX, instead of SLURM_ARRAY_TASK_ID, to select line of interest
             # link: https://stackoverflow.com/questions/67908698/submitting-slurm-array-job-with-a-limit-above-maxarraysize
@@ -259,8 +261,9 @@ def write_job_scripts(inps):
                 "step_script"       :   step_script,
                 "step_index"        :   index+1,
                 "mail"              :   inps.mail,
-                # with the gate, the gates send the (detailed) mails; plain chain: Slurm FAIL / final END
-                "mail_type"         :   'NONE' if inps.gate is not None else ('FAIL,END' if is_last else 'FAIL'),
+                # a gate after this step sends the (detailed) mails; otherwise Slurm FAIL (+ END at the end),
+                # so a stop at a step without a gate is not silent
+                "mail_type"         :   'NONE' if gated(step_num, is_last) else ('FAIL,END' if is_last else 'FAIL'),
                 "row_id0"           :   row_id0,
                 "task_id1"          :   task_id1,
                 "max_task"          :   max_task,
