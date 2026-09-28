@@ -25,7 +25,9 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 import numpy as np
 
-COLORS = {'S1A': 'tab:blue', 'S1B': 'tab:orange', 'S1C': 'tab:green'}
+COLORS = {'S1A': '#4C72B0', 'S1B': '#DD8452', 'S1C': '#55A868'}     # seaborn 'deep'
+GREY, ARC, CROSS, GAP = '#C8C8C8', '#7A8CA3', '#C47A6E', '#F2E3B3'
+plt.rcParams.update({'font.size': 12, 'axes.titlesize': 12, 'axes.labelsize': 12})
 
 
 def date_of(name):
@@ -99,26 +101,26 @@ def main():
     if not dates:
         raise SystemExit('no kept dates: no zips in the data dir and no --pairs')
     t = lambda d: datetime.strptime(d, '%Y%m%d')
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 9), sharex=True, gridspec_kw=dict(height_ratios=[1, 1.1]))
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), sharex=True, gridspec_kw=dict(height_ratios=[1, 1.1]))
 
     # top: latitude span per date
-    w = 5                                                            # bar width [days]
+    w = 6                                                            # bar width [days]
     for d, v in sorted(acq.items()):
-        c = COLORS.get(v['platform'], 'k') if v['kept'] else '0.75'
+        c = COLORS.get(v['platform'], 'k') if v['kept'] else GREY
         ax1.bar(t(d), v['n'] - v['s'], bottom=v['s'], width=w, color=c, lw=0)
     hs = [Patch(color=c, label=f'{p} kept ({k})') for p, c in COLORS.items()
           if (k := sum(v['kept'] and v['platform'] == p for v in acq.values()))]
-    hs.append(Patch(color='0.75', label=f'not used ({sum(not v["kept"] for v in acq.values())})'))
+    hs.append(Patch(color=GREY, label=f'not used ({sum(not v["kept"] for v in acq.values())})'))
     if a.sn:
         for y in a.sn:
-            ax1.axhline(y, ls='--', c='k', lw=1)
+            ax1.axhline(y, ls='--', c='0.2', lw=1.3)
         ax1.text(0.005, a.sn[1], f' select {a.sn[0]:g} / {a.sn[1]:g}', transform=ax1.get_yaxis_transform(),
-                 va='bottom', fontsize=9)
+                 va='bottom', fontsize=11)
     ax1.set_ylabel('latitude [deg]')
     ax1.set_xlim(t(min(acq)) - timedelta(days=30), t(max(acq)) + timedelta(days=30))
-    ax1.legend(handles=hs, loc='lower left', fontsize=9, ncol=4, framealpha=0.9)
+    ax1.legend(handles=hs, loc='lower left', fontsize=11, ncol=4, framealpha=0.9)
     ax1.set_title(f'{a.title} acquisitions: {len(dates)} kept of {len(acq)} dates ({dates[0]} - {dates[-1]})'
-                  if dates else f'{a.title} acquisitions: none kept', fontsize=11)
+                  if dates else f'{a.title} acquisitions: none kept')
     ax1.grid(alpha=0.3)
 
     # bottom: network on starting-range rows
@@ -138,24 +140,25 @@ def main():
         if y0 == y1:
             xs = np.linspace(x0, x1, 20)
             h = 0.45 * np.sqrt((x1 - x0) / tmax)
-            ax2.plot(xs, y0 + h * np.sin(np.pi * (xs - x0) / (x1 - x0)), c='0.4', lw=0.4, alpha=0.6)
+            ax2.plot(xs, y0 + h * np.sin(np.pi * (xs - x0) / (x1 - x0)), c=ARC, lw=0.8, alpha=0.55)
         else:
             cross += 1
-            ax2.plot([x0, x1], [y0, y1], c='tab:red', lw=0.8, alpha=0.8)
+            ax2.plot([x0, x1], [y0, y1], c=CROSS, lw=0.9, alpha=0.5)
     for d in dates:
-        ax2.plot(t(d), row[d], 'o', ms=3.5, c=COLORS.get(acq[d]['platform'], 'k'), zorder=3)
+        ax2.plot(t(d), row[d], 'o', ms=6, mec='white', mew=0.6, c=COLORS.get(acq[d]['platform'], 'k'), zorder=3)
     gaps = [(dates[i], dates[i + 1], (t(dates[i + 1]) - t(dates[i])).days) for i in range(len(dates) - 1)]
     for p, q, n in gaps:
         if n > 36:
-            ax2.axvspan(t(p), t(q), color='gold', alpha=0.25, lw=0)
+            ax2.axvspan(t(p), t(q), color=GAP, alpha=0.6, lw=0)
     ax2.set_yticks(range(len(keys)))
     ax2.set_yticklabels([f'IW1 {k[0] / 1e3:.2f} km\nIPF {ipf[k][0]}-{ipf[k][-1]}\n'
-                         f'{sum(row[d] == i for d in dates)} dates' for i, k in enumerate(keys)], fontsize=8)
+                         f'{sum(row[d] == i for d in dates)} dates' for i, k in enumerate(keys)], fontsize=10)
     ax2.set_ylim(-0.6, len(keys) - 0.4)
     ncomp = components(dates, pairs)
-    ax2.set_title(f'network ({how}): {len(pairs)} pairs, {cross} across starting-range groups (red), '
+    ax2.set_title(f'network ({how}): {len(pairs)} pairs, {cross} across starting-range groups (muted red), '
+                  f'\n'
                   f'{ncomp} connected component{"s" if ncomp != 1 else ""}; gaps > 36 d shaded '
-                  f'({sum(n > 36 for *_, n in gaps)}, max {max([n for *_, n in gaps] or [0])} d)', fontsize=11)
+                  f'({sum(n > 36 for *_, n in gaps)}, max {max([n for *_, n in gaps] or [0])} d)')
     ax2.grid(alpha=0.3, axis='x')
     ax2.xaxis.set_major_locator(mdates.YearLocator())
     ax2.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
