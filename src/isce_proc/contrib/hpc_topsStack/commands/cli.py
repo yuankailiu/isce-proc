@@ -202,7 +202,7 @@ COMMANDS = {
     'submit': (cmd_submit, 'submit job files as an afterok chain (submit_chained_dependencies.sh)'),
     'status': (cmd_status, 'check outputs per row, optionally rerun bad rows (check_topsStack.py)'),
     'clean':  (cmd_clean,  'delete intermediate files after their last reader (clean_topsStack.py)'),
-    'report': (cmd_report, 'per-step time, CPU, memory, cost, disk use (sacct) -> logs/report_<date>.*'),
+    'report': (cmd_report, 'per-step time, CPU/GPU, memory, cost, disk use (sacct) -> logs/report_<date>.*, pic/report.png'),
     'ionqc':  (cmd_ionqc,  'flag bad ionosphere pairs (loop closure; --unw: correction test) before step 24'),
     'plot':   (cmd_plot,   'quick-look figures into pic/: ion, unw, baselines, network, select'),
     'export': (cmd_export, 'copy products and records to hpc.exportDir (rsync; --dry-run)'),

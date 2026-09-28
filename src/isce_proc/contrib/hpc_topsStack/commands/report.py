@@ -1,7 +1,7 @@
 """`topsstack.py report`: per-step time, CPU, memory, cost and disk use, from sacct.
 
-Job IDs come from run_files/job_id_logfile_*.txt (all submissions) plus any extra IDs given
-(e.g. reruns). Nothing is read from the per-task timings.txt appends.
+Job IDs come from run_files/job_id_logfile_*.txt (all submissions), from sacct by job name
+(<n>_<step>_<track>, e.g. steps submitted by hand) since the stack's first log, plus any extra IDs given. Nothing is read from the per-task timings.txt appends.
 """
 import csv
 import glob
@@ -38,9 +38,29 @@ def _job_ids(run_files):
     return out
 
 
+def _ids_by_name(c, run_files, since):
+    """(step, jobid) of this track's step jobs found by name in sacct since `since` (YYYY-MM-DD)."""
+    steps = [os.path.basename(f) for f in glob.glob(os.path.join(run_files, 'run_[0-9][0-9]_*')) if '.' not in os.path.basename(f)]
+    name = {f'{int(s[4:6])}_{s[7:]}_{c.hpc.track}': s for s in steps}
+    if not name:
+        return []
+    out = subprocess.run(['sacct', '-u', os.environ.get('USER', ''), '-S', since, '-X', '--noheader', '--parsable2',
+                          f'--name={",".join(name)}', '--format=JobID,JobName%80'], capture_output=True, text=True).stdout
+    ids = {}
+    for line in out.splitlines():
+        jid, _, jname = line.partition('|')
+        if jname in name:
+            ids.setdefault(jid.split('_')[0], name[jname])
+    return [(s, j) for j, s in ids.items()]
+
+
 def report(c, extra_ids=()):
     run_files = os.path.join(c.stack, 'run_files')
     ids = _job_ids(run_files)
+    logs = glob.glob(os.path.join(run_files, 'job_id_logfile_*.txt')) or [run_files]
+    since = datetime.fromtimestamp(min(os.path.getmtime(f) for f in logs) - 86400 * 30).strftime('%Y-%m-%d')
+    known = {j for _, j in ids}
+    ids += [(s, j) for s, j in _ids_by_name(c, run_files, since) if j not in known]
     name_of = {j: s for s, j in ids}
     all_ids = [j for _, j in ids] + list(extra_ids)
     if not all_ids:
@@ -131,5 +151,17 @@ def report(c, extra_ids=()):
         w = csv.DictWriter(f, fieldnames=list(out_csv[0]) if out_csv else ['step'])
         w.writeheader()
         w.writerows(out_csv)
-    print(f'-> logs/report_{stamp}.txt, .csv')
+    with open(os.path.join(c.stack, 'logs', f'report_{stamp}_tasks.csv'), 'w', newline='') as f:
+        w = csv.writer(f)                                       # one row per array task (for plot_report.py)
+        w.writerow(['step', 'jobid', 'state', 'start', 'end', 'wall_s', 'ncpu', 'ngpu', 'max_rss_GB'])
+        for jid, t in sorted(task.items()):
+            if 'step' in t:
+                w.writerow([t['step'], jid, t['state'], t['start'], t['end'], int(t['wall']), t['ncpu'], t['ngpu'],
+                            round(t['rss'] / 2**30, 3)])
+    print(f'-> logs/report_{stamp}.txt, .csv, _tasks.csv')
+    import sys
+    script = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'scripts', 'plot_report.py')
+    subprocess.run([sys.executable, script, os.path.join(c.stack, 'logs', f'report_{stamp}.csv'),
+                    '-o', os.path.join(c.stack, 'pic', 'report.png'), '--title', c.hpc.track,
+                    '--rate', str(c.hpc.costPerCpuHour), '--gpu-units', str(c.hpc.gpuUnits)])
     return 0
