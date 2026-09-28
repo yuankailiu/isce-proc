@@ -19,6 +19,12 @@ PAIR_STEPS = {'generate_burst_igram': 'config_generate_igram_', 'merge_burst_igr
 
 def prep(c, extra=()):
     """configs/ and run_files/ via run_isce_stack.py (DEM, orbits, stackSentinel.py)."""
+    slc = os.path.join(c.stack, 'SLC')                          # stackSentinel.py reads <stack>/SLC
+    if not os.path.lexists(slc):
+        os.symlink(os.path.relpath(c.data, c.stack), slc)
+        print(f'SLC -> {os.path.relpath(c.data, c.stack)} (asf.dataDir)')
+    elif os.path.realpath(slc) != os.path.realpath(c.data):
+        print(f'warning: SLC is {os.path.realpath(slc)}, not asf.dataDir {c.data}')
     with _log(c, 'stack') as log:
         return _run([sys.executable, os.path.join(PKG, 'run_isce_stack.py'), c.template, *extra], c.stack, log)
 
