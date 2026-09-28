@@ -66,8 +66,10 @@ def read_pairs(path, dates):
     return [p for p in ps if p[0] in dates and p[1] in dates]
 
 
-def predict_pairs(dates, n):
-    return [(a, b) for i, a in enumerate(dates) for b in dates[i + 1:i + 1 + n]]
+def predict_pairs(dates, n, bridge=None):
+    """Each date with its next n dates, plus the one `bridge` dates ahead (as stack --select-pairs)."""
+    js = lambda i: sorted(set(range(i + 1, i + 1 + n)) | ({i + bridge} if bridge else set()))
+    return [(dates[i], dates[j]) for i in range(len(dates)) for j in js(i) if j < len(dates)]
 
 
 def components(dates, pairs):
@@ -88,6 +90,7 @@ def main():
     ap.add_argument('--sn', type=float, nargs=2, metavar=('S', 'N'), help='select south/north bound (dashed)')
     ap.add_argument('--pairs', help='file with the pairs (e.g. run_files/run_16_unwrap); default: predicted')
     ap.add_argument('-c', '--num-connections', type=int, default=3, help='predicted pairs per date (default: %(default)s)')
+    ap.add_argument('-b', '--bridge', type=int, help='predicted: plus the pair to the date BRIDGE ahead')
     ap.add_argument('-t', '--title', default='', help='figure title prefix (e.g. the track)')
     ap.add_argument('-o', '--outfile', default='select_network.png', help='output figure (default: %(default)s)')
     a = ap.parse_args()
@@ -131,7 +134,8 @@ def main():
     if a.pairs:
         pairs, how = read_pairs(a.pairs, set(dates)), os.path.basename(a.pairs)
     else:
-        pairs, how = predict_pairs(dates, a.num_connections), f'predicted, {a.num_connections} per date'
+        pairs = predict_pairs(dates, a.num_connections, a.bridge)
+        how = f'predicted, nearest {a.num_connections}' + (f' + bridge {a.bridge}' if a.bridge else '')
     tmax = max([(t(b) - t(a_)).days for a_, b in pairs] or [1])
     cross = 0
     for p, q in pairs:

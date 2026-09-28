@@ -264,7 +264,12 @@ def select_plot(c):
 
     Pairs from run_files/run_*_unwrap once `stack` has run, else predicted from isce.numConnection."""
     run = sorted(glob.glob(os.path.join(c.stack, 'run_files', 'run_[0-9][0-9]_unwrap')))
-    opts = ['--pairs', run[0]] if run else ['-c', str(c.isce.numConnection)]
+    if run:
+        opts = ['--pairs', run[0]]
+    elif c.select.numConnections:                              # what `stack` will keep after thinning
+        opts = ['-c', str(c.select.numConnections), '--bridge', str(c.select.bridge or c.select.numConnections)]
+    else:
+        opts = ['-c', str(c.isce.numConnection)]
     if c.select.southNorth:
         opts += ['--sn', *map(str, c.select.southNorth)]
     with _log(c, 'plot') as log:

@@ -133,14 +133,21 @@ def cmd_stack(c, extra):
     ap = argparse.ArgumentParser(prog='topsstack.py stack TEMPLATE')
     ap.add_argument('--ion-config', action='store_true', help='set filtIon/burstRampIon config keys from ion.* (idempotent)')
     ap.add_argument('--select-pairs', nargs='*', type=int, metavar=('N', 'BRIDGE'),
-                    help='thin steps 13-16 to N nearest pairs (+ one BRIDGE dates ahead) '
+                    help='thin steps 13-16 to N nearest pairs (+ one BRIDGE dates ahead); done by `stack` itself '
+                         'if select.numConnections is set '
                          f'(default: select.numConnections = {AUTO_DICT["select.numConnections"]}, select.bridge = {AUTO_DICT["select.bridge"]})')
     a, rest = ap.parse_known_args(extra)
     if a.ion_config:
         return stack.ion_config(c)
     if a.select_pairs is not None:
-        return stack.select_pairs(c, *a.select_pairs[:2])
-    return stack.prep(c, rest)
+        rc = stack.select_pairs(c, *a.select_pairs[:2])
+    else:
+        rc = stack.prep(c, rest)
+        if rc == 0 and c.select.numConnections:               # template asks for thinned pairs: apply now
+            rc = stack.select_pairs(c)
+    if rc == 0:
+        data.select_plot(c)                                   # redraw the network with the run-file pairs
+    return rc
 
 
 def cmd_report(c, extra):

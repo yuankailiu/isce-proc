@@ -106,6 +106,7 @@ topsstack.py dem ChileSenAT120.txt         # only if isce.demFile does not exist
 topsstack.py stack ChileSenAT120.txt                    # stackSentinel.py -> configs/, run_files/
 topsstack.py stack ChileSenAT120.txt --ion-config       # ionosphere only: water body, masks
 topsstack.py stack ChileSenAT120.txt --select-pairs 5 10   # optional: keep 5 nearest pairs + 10-date bridge
+                                                        # (automatic in `stack` if select.numConnections is set)
 ```
 
 `--ion-config` sets the filtIon keys (`wbdfile`, `iteration 5`, `fill nearest`; `swath_align` only if
