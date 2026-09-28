@@ -71,6 +71,9 @@ def _plot(c, what, extra, lists):
         elif what == 'baselines':
             rc = _run([sys.executable, os.path.join(SCRIPTS, 'plot_baselines_isce.py'), '--dir', 'baselines',
                        '--out', 'pic', '--name', c.hpc.track, *extra], c.stack, log)
+        elif what == 'select':
+            from commands import data
+            rc = data.select_plot(c)
         elif what == 'network':
             version = os.path.join(c.data, 's1_version.txt')
             if not os.path.isfile(version):
@@ -81,5 +84,5 @@ def _plot(c, what, extra, lists):
                     rc |= _run([sys.executable, os.path.join(SCRIPTS, 's1_network_check.py'), '-v', version,
                                 '-l', run[0], '-n', name, *extra], pic, log)
         else:
-            sys.exit(f'unknown plot target {what!r}; choose from ion, unw, baselines, network')
+            sys.exit(f'unknown plot target {what!r}; choose from ion, unw, baselines, network, select')
     return rc

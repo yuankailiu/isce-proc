@@ -252,8 +252,24 @@ def select(c, extra=()):
         sys.exit('need select.southNorth or isce.boundingBox')
     s, n = c.select.southNorth
     with _log(c, 'select') as log, open(os.path.join(c.data, 's1_select_ion.txt'), 'w') as out:
-        return _run(['s1_select_ion.py', '-dir', c.data, '-sn', str(s), str(n), '-nr', str(c.select.minAcq), *extra],
-                    c.data, log, stdout=out)
+        rc = _run(['s1_select_ion.py', '-dir', c.data, '-sn', str(s), str(n), '-nr', str(c.select.minAcq), *extra],
+                  c.data, log, stdout=out)
+    if rc == 0:                                                 # kept/not-used dates and the network to expect
+        rc = select_plot(c)
+    return rc
+
+
+def select_plot(c):
+    """pic/select_network.png (plot_select.py): latitude span per date and the pair network.
+
+    Pairs from run_files/run_*_unwrap once `stack` has run, else predicted from isce.numConnection."""
+    run = sorted(glob.glob(os.path.join(c.stack, 'run_files', 'run_[0-9][0-9]_unwrap')))
+    opts = ['--pairs', run[0]] if run else ['-c', str(c.isce.numConnection)]
+    if c.select.southNorth:
+        opts += ['--sn', *map(str, c.select.southNorth)]
+    with _log(c, 'plot') as log:
+        return _run([sys.executable, os.path.join(SCRIPTS, 'plot_select.py'), '-d', c.data, '-t', c.hpc.track,
+                     '-o', os.path.join(c.stack, 'pic', 'select_network.png'), *opts], c.stack, log)
 
 
 def dem(c, extra=()):

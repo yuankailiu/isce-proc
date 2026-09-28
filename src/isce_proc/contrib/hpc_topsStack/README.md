@@ -89,6 +89,7 @@ Run `search` alone to look at the list first. Each Slurm task uses 1 CPU.
 ```bash
 topsstack.py inspect ChileSenAT120.txt     # ../data/s1_version.txt, s1_slice.txt, epochs_latlon.png
 topsstack.py select  ChileSenAT120.txt     # s1_select_ion.py: unusable slices -> ../data/not_used/
+                                          # + pic/select_network.png (redraw: plot ... select)
 ```
 
 Open `epochs_latlon.png` to check the coverage of each date before going on.

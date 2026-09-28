@@ -35,7 +35,7 @@ EXAMPLE = """examples (from the stack directory, e.g. chile/a076/hpc_topsStack):
   topsstack.py clean  ChileSenAT076.txt esd coreg_overlap --delete
   topsstack.py report ChileSenAT076.txt                  # time/CPU/memory/cost/size per step
   topsstack.py ionqc  ChileSenAT076.txt --unw            # bad ion pairs after step 23 (--apply: exclude)
-  topsstack.py plot   ChileSenAT076.txt ion              # or unw, baselines, network
+  topsstack.py plot   ChileSenAT076.txt ion              # or unw, baselines, network, select
   topsstack.py export ChileSenAT076.txt --dry-run        # copy to hpc.exportDir
 """
 
@@ -196,7 +196,7 @@ COMMANDS = {
     'clean':  (cmd_clean,  'delete intermediate files after their last reader (clean_topsStack.py)'),
     'report': (cmd_report, 'per-step time, CPU, memory, cost, disk use (sacct) -> logs/report_<date>.*'),
     'ionqc':  (cmd_ionqc,  'flag bad ionosphere pairs (loop closure; --unw: correction test) before step 24'),
-    'plot':   (cmd_plot,   'quick-look figures into pic/: ion, unw, baselines, network'),
+    'plot':   (cmd_plot,   'quick-look figures into pic/: ion, unw, baselines, network, select'),
     'export': (cmd_export, 'copy products and records to hpc.exportDir (rsync; --dry-run)'),
 }
 
