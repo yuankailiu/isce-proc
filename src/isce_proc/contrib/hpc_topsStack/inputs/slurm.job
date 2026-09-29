@@ -16,7 +16,7 @@
 #SBATCH --mail-type={mail_type}                     # Email notification when event types occur
 #SBATCH --array=1-{task_id1}%{max_task}             # Throttle job array at a certain number of active tasks
 #SBATCH --partition={partition}                     # which partition to send the job to, 'expansion' or 'gpu'
-
+{exclude_line}
 
 ### ---------------------  optional settings  ----------------------- ###
 ###  #SBATCH --ntasks-per-node=10           	    # tasks per node

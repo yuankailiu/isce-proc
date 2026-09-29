@@ -60,7 +60,7 @@ DISK_JOB = """#!/bin/bash
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=2G
 #SBATCH --partition=expansion
-#SBATCH --output=slurm-disk_usage-%j.out
+{exclude_line}#SBATCH --output=slurm-disk_usage-%j.out
 
 du -h --max-depth=1 ..
 total=$(du -sh .. | cut -f1)
@@ -83,7 +83,7 @@ GATE_JOB = """#!/bin/bash
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=4G
 #SBATCH --partition=expansion
-#SBATCH --mail-type=NONE
+{exclude_line}#SBATCH --mail-type=NONE
 #SBATCH --output=slurm-gate-%j.out
 
 export TOPSSTACK_MAIL={mail} TOPSSTACK_TRACK={track} TOPSSTACK_TEMPLATE={template} TOPSSTACK_BIN={topsstack}
@@ -134,6 +134,8 @@ def cmdLineParse():
                         help = 'request no GPU for any step (isce.useGPU = no)')
     parser.add_argument('--template', dest='track_template', type=str, default=None,
                         help = 'track template; run_atTheEnd.sh then calls `topsstack.py report` with it')
+    parser.add_argument('--exclude', dest='exclude', type=str, default='',
+                        help='nodes to avoid, e.g. hpc-21-14,hpc-21-15 (tasks there failed at start: exit 0:53, no log)')
     parser.add_argument('--account', dest='account', type=str, default=GROUPNAME,
                         help = 'Slurm account (default: %(default)s)')
     parser.add_argument('--mail', dest='mail', type=str, default=f'{mail_user}@caltech.edu',
@@ -249,6 +251,7 @@ def write_job_scripts(inps):
             is_last    = (index == len(step_scripts) - 1) and (i == num_sbatch - 1)
 
             context = {
+                "exclude_line"      :   f'#SBATCH --exclude={inps.exclude}\n' if inps.exclude else '',
                 "groupname"         :   inps.account,
                 "time"              :   time,
                 "nodes"             :   nodes,
@@ -282,10 +285,12 @@ def write_job_scripts(inps):
                 outf.write(inps.template.format(**context))
 
     with open('disk_usage.job', 'w') as outf:
-        outf.write(DISK_JOB.format(groupname=inps.account, track=inps.track_no))
+        outf.write(DISK_JOB.format(groupname=inps.account, track=inps.track_no,
+                                    exclude_line=f'#SBATCH --exclude={inps.exclude}\n' if inps.exclude else ''))
     if inps.gate is not None:
         with open('gate.job', 'w') as outf:
             outf.write(GATE_JOB.format(groupname=inps.account, track=inps.track_no, mail=inps.mail,
+                                       exclude_line=f'#SBATCH --exclude={inps.exclude}\n' if inps.exclude else '',
                                        retries=inps.gate, python=sys.executable, template=inps.track_template or '',
                                        topsstack=SCRIPT_DIR.parent / 'topsstack.py'))
         with open('gate_steps.txt', 'w') as outf:
