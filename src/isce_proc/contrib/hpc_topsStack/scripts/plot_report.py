@@ -67,32 +67,41 @@ def main():
     num = lambda s: int(s[4:6])
     steps.sort(key=lambda r: num(r['step']))
     n = len(steps)
-    y = np.arange(n)[::-1]                                       # step 1 on top
+    ts = lambda x: datetime.fromisoformat(x) if x and x not in ('Unknown', 'None') else None
+    # started job arrays per step; rows with several job arrays get more height (one sub-bar each)
+    narr = [len({x['jobid'].split('_')[0] for x in tasks.get(r['step'], []) if ts(x['start'])}) for r in steps]
+    hrow = np.array([min(1 + 0.3 * (max(k, 1) - 1), 3.2) for k in narr])
+    edge = np.concatenate([[0], np.cumsum(hrow)])               # top of row i at total - edge[i]
+    total = edge[-1]
+    y = total - (edge[:-1] + hrow / 2)                           # step 1 on top
     labels = [f'{num(r["step"]):2d} {r["step"][7:]}' for r in steps]
     colors = [group_of(num(r['step']))[1] for r in steps]
 
-    fig, axs = plt.subplots(1, 3, figsize=(18, 0.42 * n + 2.0), sharey=True,
+    fig, axs = plt.subplots(1, 3, figsize=(18, 0.42 * total + 2.0), sharey=True,
                             gridspec_kw=dict(width_ratios=[1.15, 1, 1.05], wspace=0.05))
     ax1, ax2, ax3 = axs
 
-    ts = lambda x: datetime.fromisoformat(x) if x and x not in ('Unknown', 'None') else None
     done = lambda x: x['state'].startswith('COMPLETED')
     unit = lambda x: float(x['wall_s']) / 3600 * (float(x['ncpu']) + float(x['ngpu']) * a.gpu_units)
     RERUN = '#E0A458'                                            # muted amber: failed / cancelled / repeated work
 
     # 1. timeline: one bar per job array of the step (sub-rows), red if most of its array tasks did not complete
-    for yi, r, c in zip(y, steps, colors):
+    for yi, hr, r, c in zip(y, hrow, steps, colors):
         arrays = defaultdict(list)
         for x in tasks.get(r['step'], []):
             if ts(x['start']) and ts(x['end']):
                 arrays[x['jobid'].split('_')[0]].append(x)
         arrays = sorted(arrays.values(), key=lambda t: min(ts(x['start']) for x in t))
         k = max(len(arrays), 1)
-        hgt = 0.8 / k
+        if arrays:                                               # light band: the whole step span, idle gaps included
+            s1, e1 = min(ts(x['start']) for t in arrays for x in t), max(ts(x['end']) for t in arrays for x in t)
+            ax1.barh(yi, mdates.date2num(e1) - mdates.date2num(s1), left=mdates.date2num(s1), height=hr - 0.12,
+                     color=c, alpha=0.12, lw=0)
+        hgt = (hr - 0.2) / k
         for m, t in enumerate(arrays):
             s0_, e0_ = min(ts(x['start']) for x in t), max(ts(x['end']) for x in t)
             frac = sum(map(done, t)) / len(t)
-            ax1.barh(yi + 0.4 - hgt * (m + 0.5), max(mdates.date2num(e0_) - mdates.date2num(s0_), 0.02),
+            ax1.barh(yi + (hr - 0.2) / 2 - hgt * (m + 0.5), max(mdates.date2num(e0_) - mdates.date2num(s0_), 0.035),
                      left=mdates.date2num(s0_), height=hgt * 0.9, color=c if frac >= 0.5 else RERUN, alpha=0.9, lw=0)
         e = ts(r['end'])
         if e:
@@ -107,7 +116,7 @@ def main():
     ax1.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))
     ax1.set_yticks(y)
     ax1.set_yticklabels(labels, fontsize=12)
-    ax1.set_xlabel('date\n(one bar per job array, first start to last end)')
+    ax1.set_xlabel('date\n(bar: job array; band: step span incl. idle gaps)')
     ax1.set_title('timeline')
     ax1.grid(axis='x', alpha=0.3)
 
@@ -175,12 +184,12 @@ def main():
     ax3.set_title('array task wall time')
     ax3.grid(axis='x', alpha=0.3, which='both')
     for ax in axs:
-        ax.set_ylim(-0.7, n - 0.3)
+        ax.set_ylim(0, total)
         # group separators
         for name, lo, hi, color in GROUPS[1:]:
             k = [i for i, r in enumerate(steps) if num(r['step']) >= lo]
             if k and k[0] > 0:
-                ax.axhline(y[k[0]] + 0.5, c='0.6', lw=0.8, ls=':')
+                ax.axhline(total - edge[k[0]], c='0.6', lw=0.8, ls=':')
 
     units = tot.sum()
     cpu_h, gpu_h = cpu.sum(), gpu.sum() / a.gpu_units
