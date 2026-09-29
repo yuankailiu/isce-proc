@@ -33,7 +33,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import Patch
 
-plt.rcParams.update({'font.size': 13, 'axes.titlesize': 14, 'axes.labelsize': 13,
+plt.rcParams.update({'font.size': 15, 'axes.titlesize': 16, 'axes.labelsize': 15, 'xtick.labelsize': 14, 'ytick.labelsize': 14,
                      'axes.spines.top': False, 'axes.spines.right': False})
 GROUPS = [('coregistration', 1, 12, '#4C72B0'), ('interferograms', 13, 16, '#55A868'),
           ('ionosphere', 17, 28, '#C44E52')]
@@ -83,7 +83,7 @@ def main():
     labels = [f'{num(r["step"]):2d} {r["step"][7:]}' for r in steps]
     colors = [group_of(num(r['step']))[1] for r in steps]
 
-    fig, axs = plt.subplots(1, 3, figsize=(18, 0.42 * total + 2.0), sharey=True,
+    fig, axs = plt.subplots(1, 3, figsize=(21, 0.5 * total + 2.4), sharey=True,
                             gridspec_kw=dict(width_ratios=[1.15, 1, 1.05], wspace=0.05))
     ax1, ax2, ax3 = axs
 
@@ -133,7 +133,7 @@ def main():
         e = max((ts(x['end']) for t in arrays for x in t), default=None)
         if e:
             ax1.text(X(e) + 0.006 * offs[-1], yi, (f'{h:.1f} h' if h >= 1 else f'{h * 60:.0f} min')
-                     + (f', {len(arrays)} arrays' if len(arrays) > 1 else ''), va='center', fontsize=10.5, color='0.25')
+                     + (f', {len(arrays)} arrays' if len(arrays) > 1 else ''), va='center', fontsize=12.5, color='0.25')
     ax1.set_xlim(-0.02 * offs[-1], offs[-1] * 1.26)               # room for the labels of the last steps
     ticks, tlabels = [], []
     for k, (s_, e_) in enumerate(segs):
@@ -150,11 +150,11 @@ def main():
             xb = offs[k] + seglen[k] + spacer / 2
             ax1.axvline(xb, c='0.45', lw=1.2, ls=(0, (4, 3)))
             ax1.text(xb, 0.5, f' {(segs[k + 1][0] - e_).days} d gap ', transform=ax1.get_xaxis_transform(), rotation=90,
-                     ha='center', va='center', fontsize=10.5, color='0.35', bbox=dict(fc='white', ec='none', pad=1))
+                     ha='center', va='center', fontsize=12.5, color='0.35', bbox=dict(fc='white', ec='none', pad=1))
     ax1.set_xticks(ticks)
     ax1.set_xticklabels(tlabels, rotation=30 if len(segs) > 1 else 0, ha='right' if len(segs) > 1 else 'center')
     ax1.set_yticks(y)
-    ax1.set_yticklabels(labels, fontsize=12)
+    ax1.set_yticklabels(labels, fontsize=14)
     ax1.set_xlabel('date\n(bar: job array; band: step span within a campaign)')
     ax1.set_title('timeline')
     ax1.grid(axis='x', alpha=0.3)
@@ -188,7 +188,7 @@ def main():
             lab = '<\\$0.01' if cost < 0.01 else (f'\\${cost:,.2f}' if cost < 10 else f'\\${cost:,.0f}')
             if x_ >= 0.05 * u and x_ * a.rate >= 0.01:
                 lab += f' ({100 * x_ / u:.0f} %)'
-            ax2.text(u * 1.08, yi, lab, va='center', fontsize=11, color='0.25')
+            ax2.text(u * 1.08, yi, lab, va='center', fontsize=13, color='0.25')
     ax2.set_xscale('symlog', linthresh=1)
     ax2.set_xlim(0, tot.max() * 30)
     ax2.set_xlabel(f'compute units\n(CPU core-h + {a.gpu_units:g} x GPU h; label: cost)')
@@ -201,7 +201,7 @@ def main():
     hs.append(Patch(facecolor='0.85', hatch='///', edgecolor='white', label='GPU part'))
     hs.append(Patch(color=RERUN, alpha=0.75, label=f'extra: {extra.sum():,.0f} units ({100 * extra.sum() / tot.sum():.0f} %)\n'
                                                    '(failed, cancelled, repeats\nwithin a campaign)'))
-    ax1.legend(handles=hs, loc='upper right', fontsize=11.5, framealpha=0.95, title='compute units', title_fontsize=11.5)
+    ax1.legend(handles=hs, loc='upper right', fontsize=13.5, framealpha=0.95, title='compute units', title_fontsize=13.5)
 
     # 3. wall time per array task
     for yi, r, c in zip(y, steps, colors):
@@ -222,14 +222,14 @@ def main():
         else:
             more = bad
         ax3.text(1.02, yi, f'{rows:,}' if rows is not None else f'{len(t):,}', transform=ax3.get_yaxis_transform(),
-                 va='center', ha='left', fontsize=11, color='0.3')
+                 va='center', ha='left', fontsize=13, color='0.3')
         if more > 0:
             ax3.text(1.155, yi, f'+{more:,}', transform=ax3.get_yaxis_transform(), va='center', ha='left',
-                     fontsize=11, color=RERUN)
+                     fontsize=13, color=RERUN)
     ax3.set_xscale('log')
     ax3.set_xlabel('wall time per array task [min], completed ones\n(box 25-75 %, bar median, whisker 5-95 %)')
-    ax3.text(1.02, 1.0, 'rows', transform=ax3.transAxes, va='bottom', ha='left', fontsize=11.5, color='0.3')
-    ax3.text(1.155, 1.0, 'extra', transform=ax3.transAxes, va='bottom', ha='left', fontsize=11.5, color=RERUN)
+    ax3.text(1.02, 1.0, 'rows', transform=ax3.transAxes, va='bottom', ha='left', fontsize=13.5, color='0.3')
+    ax3.text(1.155, 1.0, 'extra', transform=ax3.transAxes, va='bottom', ha='left', fontsize=13.5, color=RERUN)
     ax3.set_title('array task wall time')
     ax3.grid(axis='x', alpha=0.3, which='both')
     for ax in axs:
@@ -248,16 +248,19 @@ def main():
     e0 = max(ts(r['end']) for r in steps if ts(r['end']))
     fig.suptitle(f'{a.title}:  \\${units * a.rate:,.0f}  ({units:,.0f} compute units),  '
                  + (f'{sum(seglen):.1f} days' if len(segs) == 1 else f'{sum(seglen):.1f} days in {len(segs)} campaigns'),
-                 fontsize=16, y=0.997)
-    detail = (f'{n} steps, {nrows:,} rows, {ntask:,} array tasks;  {cpu_h:,.0f} CPU core-h + {gpu_h:,.0f} GPU h '
-              f'(x {a.gpu_units:g}) = {units:,.0f} units at \\${a.rate:g} / unit;  extra {extra.sum():,.0f} units '
-              f'({100 * extra.sum() / max(tot.sum(), 1e-9):.0f} %)\n'
-              + ('campaign: ' if len(segs) == 1 else 'campaigns: ')
-              + ',  '.join(f'{s_:%Y-%m-%d %H:%M} to {e_:%Y-%m-%d %H:%M} ({l:.1f} d)' for (s_, e_), l in zip(segs, seglen))
-              + (f';  gaps > {GAP_DAYS:g} d without array tasks separate campaigns and are not counted as time'
-                 if len(segs) > 1 else ''))
-    fig.text(0.5, 0.004, detail, ha='center', va='bottom', fontsize=11.5, color='0.3')
-    fig.subplots_adjust(left=0.178, right=0.875, top=1 - 0.85 / fig.get_figheight(), bottom=(1.55 if len(segs) == 1 else 1.95) / fig.get_figheight())
+                 fontsize=18, y=0.997)
+    detail = [f'{n} steps, {nrows:,} rows (run-file lines), {ntask:,} array tasks',
+              f'compute: {cpu_h:,.0f} CPU core-h + {gpu_h:,.0f} GPU h x {a.gpu_units:g} = {units:,.0f} units, '
+              f'at \\${a.rate:g} / unit = \\${units * a.rate:,.0f};  extra {extra.sum():,.0f} units '
+              f'({100 * extra.sum() / max(tot.sum(), 1e-9):.0f} %: failed, cancelled, repeats within a campaign)']
+    detail += [f'campaign {k + 1}: {s_:%Y-%m-%d %H:%M} to {e_:%Y-%m-%d %H:%M} ({l:.1f} d)'
+               for k, ((s_, e_), l) in enumerate(zip(segs, seglen))]
+    if len(segs) > 1:
+        detail.append(f'gaps > {GAP_DAYS:g} d without any array task separate campaigns; they are not counted as time')
+    nfoot = len(detail)
+    fig.subplots_adjust(left=0.19, right=0.875, top=1 - 0.85 / fig.get_figheight(), bottom=(1.25 + 0.3 * nfoot + (0.4 if len(segs) > 1 else 0)) / fig.get_figheight())
+    fig.text(ax1.get_position().x0, 0.08 / fig.get_figheight(), '\n'.join(detail), ha='left', va='bottom',
+             fontsize=14, color='0.3', linespacing=1.4)
     os.makedirs(os.path.dirname(os.path.abspath(a.outfile)), exist_ok=True)
     fig.savefig(a.outfile, dpi=150)
     print(f'{units:,.0f} units, ${units * a.rate:,.2f} -> {a.outfile}')
