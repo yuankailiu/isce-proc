@@ -149,8 +149,8 @@ def main():
         if k < len(segs) - 1:                                    # break mark: idle gap cut out
             xb = offs[k] + seglen[k] + spacer / 2
             ax1.axvline(xb, c='0.45', lw=1.2, ls=(0, (4, 3)))
-            ax1.text(xb, 1.0, f'{(segs[k + 1][0] - e_).days} d between\ncampaigns', transform=ax1.get_xaxis_transform(),
-                     ha='center', va='bottom', fontsize=10, color='0.35')
+            ax1.text(xb, 0.5, f' {(segs[k + 1][0] - e_).days} d gap ', transform=ax1.get_xaxis_transform(), rotation=90,
+                     ha='center', va='center', fontsize=10.5, color='0.35', bbox=dict(fc='white', ec='none', pad=1))
     ax1.set_xticks(ticks)
     ax1.set_xticklabels(tlabels, rotation=30 if len(segs) > 1 else 0, ha='right' if len(segs) > 1 else 'center')
     ax1.set_yticks(y)
@@ -246,15 +246,18 @@ def main():
     ntask = sum(len(v) for v in tasks.values())
     s0 = min(ts(r['start']) for r in steps if ts(r['start']))
     e0 = max(ts(r['end']) for r in steps if ts(r['end']))
-    fig.suptitle(f'{a.title}   {n} steps, {nrows:,} rows, {ntask:,} array tasks   '
-                 f'{cpu_h:,.0f} CPU core-h + {gpu_h:,.0f} GPU h = {units:,.0f} units   '
-                 f'\\${units * a.rate:,.0f} at \\${a.rate:g} / unit\n'
-                 + (f'{(e0 - s0).total_seconds() / 86400:.1f} days ({s0:%Y-%m-%d} to {e0:%Y-%m-%d})' if len(segs) == 1 else
-                    f'{sum(seglen):.1f} days in {len(segs)} campaigns: '
-                    + ', '.join(f'{s_:%Y-%m-%d} ({l:.1f} d)' for (s_, e_), l in zip(segs, seglen))
-                    + f'; idle between campaigns (> {GAP_DAYS:g} d) not counted')
-                 , fontsize=15, y=0.998)
-    fig.subplots_adjust(left=0.178, right=0.875, top=1 - 1.15 / fig.get_figheight(), bottom=(1.05 if len(segs) == 1 else 1.45) / fig.get_figheight())
+    fig.suptitle(f'{a.title}:  \\${units * a.rate:,.0f}  ({units:,.0f} compute units),  '
+                 + (f'{sum(seglen):.1f} days' if len(segs) == 1 else f'{sum(seglen):.1f} days in {len(segs)} campaigns'),
+                 fontsize=16, y=0.997)
+    detail = (f'{n} steps, {nrows:,} rows, {ntask:,} array tasks;  {cpu_h:,.0f} CPU core-h + {gpu_h:,.0f} GPU h '
+              f'(x {a.gpu_units:g}) = {units:,.0f} units at \\${a.rate:g} / unit;  extra {extra.sum():,.0f} units '
+              f'({100 * extra.sum() / max(tot.sum(), 1e-9):.0f} %)\n'
+              + ('campaign: ' if len(segs) == 1 else 'campaigns: ')
+              + ',  '.join(f'{s_:%Y-%m-%d %H:%M} to {e_:%Y-%m-%d %H:%M} ({l:.1f} d)' for (s_, e_), l in zip(segs, seglen))
+              + (f';  gaps > {GAP_DAYS:g} d without array tasks separate campaigns and are not counted as time'
+                 if len(segs) > 1 else ''))
+    fig.text(0.5, 0.004, detail, ha='center', va='bottom', fontsize=11.5, color='0.3')
+    fig.subplots_adjust(left=0.178, right=0.875, top=1 - 0.85 / fig.get_figheight(), bottom=(1.55 if len(segs) == 1 else 1.95) / fig.get_figheight())
     os.makedirs(os.path.dirname(os.path.abspath(a.outfile)), exist_ok=True)
     fig.savefig(a.outfile, dpi=150)
     print(f'{units:,.0f} units, ${units * a.rate:,.2f} -> {a.outfile}')
