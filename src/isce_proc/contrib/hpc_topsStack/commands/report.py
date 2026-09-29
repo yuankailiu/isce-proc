@@ -111,7 +111,7 @@ def report(c, extra_ids=()):
             if len(w) >= 5:
                 sizes[w[1]] = w[4]                              # step number -> size after (or during) it
     fmt = lambda s: datetime.fromisoformat(s) if s else None
-    lines = [f'{"step":36s} {"tasks":>6s} {"states":28s} {"wall span":>10s} {"CPU h":>8s} {"alloc CPU h":>11s} '
+    lines = [f'{"step":36s} {"arrtask":>7s} {"states":28s} {"wall span":>10s} {"CPU h":>8s} {"alloc CPU h":>11s} '
              f'{"GPU h":>6s} {"cost $":>7s} {"max RSS":>8s} {"req mem":>8s} {"size":>6s}']
     tot = {'cpu': 0.0, 'alloc': 0.0, 'gpu': 0.0}
     units = lambda p: p['alloc'] / 3600 + p['gpu'] / 3600 * c.hpc.gpuUnits   # compute units
@@ -122,7 +122,7 @@ def report(c, extra_ids=()):
         states = ','.join(f'{k}:{v}' for k, v in sorted(p['states'].items()))
         cost = units(p) * c.hpc.costPerCpuHour
         size = sizes.get(step[:6], '')
-        lines.append(f'{step:36s} {p["n"]:6d} {states[:28]:28s} {span:9.1f}h {p["cpu"] / 3600:8.1f} '
+        lines.append(f'{step:36s} {p["n"]:7d} {states[:28]:28s} {span:9.1f}h {p["cpu"] / 3600:8.1f} '
                      f'{p["alloc"] / 3600:11.1f} {p["gpu"] / 3600:6.1f} {cost:7.2f} {p["rss"] / 2**30:7.1f}G {p["req"]:>8s} {size:>6s}')
         tot['cpu'] += p['cpu']
         tot['alloc'] += p['alloc']
@@ -134,12 +134,13 @@ def report(c, extra_ids=()):
                         'alloc_cpu_h': round(p['alloc'] / 3600, 3), 'gpu_h': round(p['gpu'] / 3600, 3),
                         'cost_usd': round(cost, 2),
                         'max_rss_GB': round(p['rss'] / 2**30, 2), 'req_mem': p['req'], 'size_after': size})
-    lines.append(f'{"total":36s} {"":6s} {"":28s} {"":>10s} {tot["cpu"] / 3600:8.1f} {tot["alloc"] / 3600:11.1f} '
+    lines.append(f'{"total":36s} {"":7s} {"":28s} {"":>10s} {tot["cpu"] / 3600:8.1f} {tot["alloc"] / 3600:11.1f} '
                  f'{tot["gpu"] / 3600:6.1f} {units(tot) * c.hpc.costPerCpuHour:7.2f}')
     if tot['alloc'] and tot['cpu'] < 0.01 * tot['alloc']:
         lines.append('CPU h: this cluster\'s accounting records (almost) no CPU time for job steps, so only '
                      'alloc CPU h is meaningful')
-    lines.append('tasks, states and wall span cover all submissions of a step (reruns included); '
+    lines.append('arrtask: Slurm array tasks (one row of the run file each) of all submissions of a step, reruns '
+                 'included; states and wall span cover them too; '
                  'wall span = first start to last end; alloc CPU h = elapsed x allocated CPUs; '
                  f'cost = (alloc CPU h + GPU h x {c.hpc.gpuUnits:g}) x ${c.hpc.costPerCpuHour:g} per compute unit '
                  '(hpc.costPerCpuHour, hpc.gpuUnits)')
