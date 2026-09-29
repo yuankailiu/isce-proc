@@ -45,11 +45,14 @@ def _ids_by_name(c, run_files, since):
     if not name:
         return []
     out = subprocess.run(['sacct', '-u', os.environ.get('USER', ''), '-S', since, '-X', '--noheader', '--parsable2',
-                          f'--name={",".join(name)}', '--format=JobID,JobName%80'], capture_output=True, text=True).stdout
+                          f'--name={",".join(name)}', '--format=JobID,JobName%80,WorkDir%300'],
+                         capture_output=True, text=True).stdout
     ids = {}
+    here = os.path.realpath(c.stack)
     for line in out.splitlines():
-        jid, _, jname = line.partition('|')
-        if jname in name:
+        jid, jname, wdir = (line.split('|') + ['', ''])[:3]
+        # north and south stacks of a track share job names: keep jobs that ran in this stack
+        if jname in name and os.path.realpath(wdir or '/').startswith(here):
             ids.setdefault(jid.split('_')[0], name[jname])
     return [(s, j) for j, s in ids.items()]
 
