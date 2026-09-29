@@ -87,7 +87,7 @@ def main():
 
     # 1. timeline: one bar per job array of the step (sub-rows), amber if most of its array tasks did not complete.
     # Idle periods longer than GAP_DAYS (e.g. a rerun a year later) are cut out of the axis and marked.
-    GAP_DAYS = 3
+    GAP_DAYS = 14
     iv = sorted((ts(x['start']), ts(x['end'])) for t in tasks.values() for x in t if ts(x['start']) and ts(x['end']))
     segs = []
     for s_, e_ in iv:
