@@ -24,7 +24,8 @@ MAX_ARRAY = 1000   # rows per .pN job file, as in write_slurmJobs.py
 CFG_OUT = {'generateIgram': ['interferogram'], 'mergeBursts': ['outfile'], 'mergeBurstsIon': ['outfile'],
            'FilterAndCoherence': ['filt', 'coh', 'complex_coh'], 'unwrap': ['unw'],
            'coherenceIon': ['coherence'], 'lookUnwIon': ['output'], 'filtIon': ['output'],
-           'filtIonShift': ['output'], 'burstRampIon': ['output']}
+           'filtIonShift': ['output'], 'burstRampIon': ['output'],
+           'estimateAzimuthMisreg': ['out_azimuth'], 'estimateRangeMisreg': ['out_range']}
 CLI_OUT = ['--output', '--odir', '--ionosphere', '--coherence_output']
 DTYPE = {'CFLOAT': 8, 'FLOAT': 4, 'BYTE': 1, 'DOUBLE': 8, 'CDOUBLE': 16, 'SHORT': 2, 'INT': 4}
 LOG_ERR = re.compile(r'Traceback|srun: error|Exit status: [1-9]|DUE TO TIME LIMIT|CANCELLED AT|'
@@ -46,6 +47,9 @@ def outputs(cmd):
                     # without multilooking only <outfile>.full is written, as a VRT if use_virtual_files
                     full = kv[key] + '.full'
                     out.append((full + '.vrt', 'file') if kv.get('use_virtual_files') == 'True' else (full, 'file'))
+                elif func == 'generateIgram' and kv.get('overlap') == 'True':
+                    # ESD (pairs_misreg): overlap interferograms <dir>/overlap/IW*/int_*.int, not IW*/fine_*.int
+                    out.append((kv[key], 'overlap_dir'))
                 elif func == 'generateIgram':
                     out.append((kv[key], 'igram_dir', (kv.get('reference'), kv.get('secondary'))))
                 else:
@@ -94,6 +98,11 @@ def check_row(cmd):
             if not files:
                 bad.append(f'{path}: no burst interferograms')
             bad += [f'{f}: {r}' for f in sorted(files) for r in [check_file(f)] if r]
+        elif kind == 'overlap_dir':
+            ints = sorted(glob.glob(os.path.join(path, 'overlap', 'IW*', 'int_*.int')))
+            if not ints:
+                bad.append(f'{path}: no overlap interferograms')
+            bad += [f'{f}: {r}' for f in ints for r in [check_file(f)] if r]
         else:
             r = check_file(path)
             if r:
