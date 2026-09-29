@@ -6,8 +6,11 @@ and ionosphere (17-28). Panels, sharing the rows:
 Terms (Slurm): each step is submitted as one or more job arrays (one per .job file, and again for
 reruns); each array task (JobID <array>_<index>, --nodes=1 --ntasks=1) runs one row, i.e. one line
 of the run file. Array tasks of all submissions are counted.
-  1. timeline: one bar per job array of the step, first start to last end; red if most of its
-     array tasks failed or were cancelled
+  1. timeline: one bar per job array of the step, first start to last end; amber if most of its
+     array tasks failed or were cancelled. Campaigns (processing periods separated by more than
+     --campaign-gap days without any array task, i.e. a later decision to rerun or add steps) are
+     drawn side by side; the idle time between them is not counted as wall time
+  (extra in 2. is estimated per campaign, so a later campaign's deliberate rerun counts as needed)
   2. compute units per step: CPU core-hours + GPU hours x GPU_UNITS, with the cost at RATE; red part:
      extra = total - rows x median completed array task (reruns, failed, cancelled; an estimate)
   3. wall time per array task: distribution over the completed array tasks (box: quartiles,
@@ -55,6 +58,9 @@ def main():
     ap.add_argument('--rate', type=float, default=0.012, help='$ per compute unit (default: %(default)s)')
     ap.add_argument('--gpu-units', type=float, default=10, help='compute units per GPU hour (default: %(default)s)')
     ap.add_argument('--title', default='', help='title prefix (e.g. the track)')
+    ap.add_argument('--campaign-gap', type=float, default=14, metavar='DAYS',
+                    help='idle time that separates processing campaigns (a later decision to rerun or add steps): '
+                         'cut from the timeline and from the wall time; compute is counted (default: %(default)s)')
     a = ap.parse_args()
 
     steps = list(csv.DictReader(open(a.csv)))
@@ -85,9 +91,9 @@ def main():
     unit = lambda x: float(x['wall_s']) / 3600 * (float(x['ncpu']) + float(x['ngpu']) * a.gpu_units)
     RERUN = '#E0A458'                                            # muted amber: failed / cancelled / repeated work
 
-    # 1. timeline: one bar per job array of the step (sub-rows), amber if most of its array tasks did not complete.
-    # Idle periods longer than GAP_DAYS (e.g. a rerun a year later) are cut out of the axis and marked.
-    GAP_DAYS = 14
+    # campaigns: periods of processing separated by more than --campaign-gap days of no array task running
+    # (decision time, e.g. adding the ionosphere months later), not computation time
+    GAP_DAYS = a.campaign_gap
     iv = sorted((ts(x['start']), ts(x['end'])) for t in tasks.values() for x in t if ts(x['start']) and ts(x['end']))
     segs = []
     for s_, e_ in iv:
@@ -98,6 +104,7 @@ def main():
     seglen = [mdates.date2num(e_) - mdates.date2num(s_) for s_, e_ in segs] or [1]
     spacer = 0.06 * sum(seglen) if len(segs) > 1 else 0
     offs = np.concatenate([[0], np.cumsum([l + spacer for l in seglen])])
+    camp = lambda t: next((k for k, (s_, e_) in enumerate(segs) if t <= e_), len(segs) - 1)
     def X(t):                                                    # date -> compressed axis coordinate
         d = mdates.date2num(t)
         for k, (s_, e_) in enumerate(segs):
@@ -111,21 +118,20 @@ def main():
                 arrays[x['jobid'].split('_')[0]].append(x)
         arrays = sorted(arrays.values(), key=lambda t: min(ts(x['start']) for x in t))
         k = max(len(arrays), 1)
-        if arrays:                                               # light band: the whole step span, idle gaps included
-            s1, e1 = min(ts(x['start']) for t in arrays for x in t), max(ts(x['end']) for t in arrays for x in t)
-            ax1.barh(yi, X(e1) - X(s1), left=X(s1), height=hr - 0.12,
-                     color=c, alpha=0.12, lw=0)
+        h = 0.0                                                  # active hours: sum of the step's spans per campaign
+        for kc in sorted({camp(ts(x['start'])) for t in arrays for x in t}):
+            xs = [x for t in arrays for x in t if camp(ts(x['start'])) == kc]
+            s1, e1 = min(ts(x['start']) for x in xs), max(ts(x['end']) for x in xs)
+            ax1.barh(yi, X(e1) - X(s1), left=X(s1), height=hr - 0.12, color=c, alpha=0.12, lw=0)
+            h += (e1 - s1).total_seconds() / 3600
         hgt = (hr - 0.2) / k
         for m, t in enumerate(arrays):
             s0_, e0_ = min(ts(x['start']) for x in t), max(ts(x['end']) for x in t)
             frac = sum(map(done, t)) / len(t)
             ax1.barh(yi + (hr - 0.2) / 2 - hgt * (m + 0.5), max(X(e0_) - X(s0_), 0.004 * offs[-1]),
                      left=X(s0_), height=hgt * 0.9, color=c if frac >= 0.5 else RERUN, alpha=0.9, lw=0)
-        e = ts(r['end'])
-        if e and arrays:
-            k0 = next(k for k, (s_, e_) in enumerate(segs) if s1 <= e_)
-            k1 = next(k for k, (s_, e_) in enumerate(segs) if e1 <= e_)
-            h = (X(e1) - X(s1) - spacer * (k1 - k0)) * 24             # active hours: idle gaps cut out
+        e = max((ts(x['end']) for t in arrays for x in t), default=None)
+        if e:
             ax1.text(X(e) + 0.006 * offs[-1], yi, (f'{h:.1f} h' if h >= 1 else f'{h * 60:.0f} min')
                      + (f', {len(arrays)} arrays' if len(arrays) > 1 else ''), va='center', fontsize=10.5, color='0.25')
     ax1.set_xlim(-0.02 * offs[-1], offs[-1] * 1.26)               # room for the labels of the last steps
@@ -143,13 +149,13 @@ def main():
         if k < len(segs) - 1:                                    # break mark: idle gap cut out
             xb = offs[k] + seglen[k] + spacer / 2
             ax1.axvline(xb, c='0.45', lw=1.2, ls=(0, (4, 3)))
-            ax1.text(xb, 1.0, f'{(segs[k + 1][0] - e_).days} d idle', transform=ax1.get_xaxis_transform(),
+            ax1.text(xb, 1.0, f'{(segs[k + 1][0] - e_).days} d between\ncampaigns', transform=ax1.get_xaxis_transform(),
                      ha='center', va='bottom', fontsize=10, color='0.35')
     ax1.set_xticks(ticks)
     ax1.set_xticklabels(tlabels, rotation=30 if len(segs) > 1 else 0, ha='right' if len(segs) > 1 else 'center')
     ax1.set_yticks(y)
     ax1.set_yticklabels(labels, fontsize=12)
-    ax1.set_xlabel('date\n(bar: job array; band: step span incl. idle gaps)')
+    ax1.set_xlabel('date\n(bar: job array; band: step span within a campaign)')
     ax1.set_title('timeline')
     ax1.grid(axis='x', alpha=0.3)
 
@@ -158,14 +164,18 @@ def main():
     gpu = np.array([float(r.get('gpu_h') or 0) for r in steps]) * a.gpu_units
     tot = cpu + gpu
     extra = np.zeros(n)
-    for i, r in enumerate(steps):
-        t = tasks.get(r['step'], [])
-        ok = [unit(x) for x in t if done(x)]
+    for i, r in enumerate(steps):                                # per campaign: a later campaign's rerun is needed work
         rows = int(r['rows']) if r.get('rows') else None
-        if t and rows and ok:
-            extra[i] = max(tot[i] - min(rows, len(ok)) * float(np.median(ok)), 0)
-        elif t:
-            extra[i] = sum(unit(x) for x in t if not done(x))
+        byc = defaultdict(list)
+        for x in tasks.get(r['step'], []):
+            byc[camp(ts(x['start'])) if ts(x['start']) else -1].append(x)
+        for kc, t in byc.items():
+            ok = [unit(x) for x in t if done(x)]
+            if kc >= 0 and rows and ok:
+                extra[i] += max(sum(map(unit, t)) - min(rows, len(ok)) * float(np.median(ok)), 0)
+            else:
+                extra[i] += sum(unit(x) for x in t if not done(x))
+        extra[i] = min(extra[i], tot[i])
     need = tot - extra
     gshare = np.where(tot > 0, gpu / np.maximum(tot, 1e-9), 0)
     ax2.barh(y, need * (1 - gshare), height=0.78, color=colors, lw=0)
@@ -190,7 +200,7 @@ def main():
     hs = [Patch(color=c, label=f'{g}: {share[g]:,.0f} units') for g, _, _, c in GROUPS if share[g]]
     hs.append(Patch(facecolor='0.85', hatch='///', edgecolor='white', label='GPU part'))
     hs.append(Patch(color=RERUN, alpha=0.75, label=f'extra: {extra.sum():,.0f} units ({100 * extra.sum() / tot.sum():.0f} %)\n'
-                                                   '(reruns, failed, cancelled)'))
+                                                   '(failed, cancelled, repeats\nwithin a campaign)'))
     ax1.legend(handles=hs, loc='upper right', fontsize=11.5, framealpha=0.95, title='compute units', title_fontsize=11.5)
 
     # 3. wall time per array task
@@ -204,7 +214,13 @@ def main():
             ax3.barh(yi, max(q75 - q25, q50 * 0.08), left=q25, height=0.7, color=lighter(c, 0.35), edgecolor=c, lw=1.2)
             ax3.plot([q50, q50], [yi - 0.35, yi + 0.35], c='0.15', lw=2)
         rows = int(r['rows']) if r.get('rows') else None
-        more = len(t) - rows if rows is not None else bad
+        if rows is not None:                                     # extra array tasks per campaign, as in panel 2
+            nc = defaultdict(int)
+            for x in t:
+                nc[camp(ts(x['start'])) if ts(x['start']) else -1] += 1
+            more = sum(max(v - rows, 0) if k >= 0 else v for k, v in nc.items())
+        else:
+            more = bad
         ax3.text(1.02, yi, f'{rows:,}' if rows is not None else f'{len(t):,}', transform=ax3.get_yaxis_transform(),
                  va='center', ha='left', fontsize=11, color='0.3')
         if more > 0:
@@ -233,8 +249,10 @@ def main():
     fig.suptitle(f'{a.title}   {n} steps, {nrows:,} rows, {ntask:,} array tasks   '
                  f'{cpu_h:,.0f} CPU core-h + {gpu_h:,.0f} GPU h = {units:,.0f} units   '
                  f'\\${units * a.rate:,.0f} at \\${a.rate:g} / unit\n'
-                 + (f'{(e0 - s0).total_seconds() / 86400:.1f} days ({s0:%Y-%m-%d} to {e0:%Y-%m-%d})   ' if len(segs) == 1 else
-                    f'{sum(seglen):.1f} active days in {len(segs)} periods ({s0:%Y-%m-%d} to {e0:%Y-%m-%d})   ')
+                 + (f'{(e0 - s0).total_seconds() / 86400:.1f} days ({s0:%Y-%m-%d} to {e0:%Y-%m-%d})' if len(segs) == 1 else
+                    f'{sum(seglen):.1f} days in {len(segs)} campaigns: '
+                    + ', '.join(f'{s_:%Y-%m-%d} ({l:.1f} d)' for (s_, e_), l in zip(segs, seglen))
+                    + f'; idle between campaigns (> {GAP_DAYS:g} d) not counted')
                  , fontsize=15, y=0.998)
     fig.subplots_adjust(left=0.178, right=0.875, top=1 - 1.15 / fig.get_figheight(), bottom=(1.05 if len(segs) == 1 else 1.45) / fig.get_figheight())
     os.makedirs(os.path.dirname(os.path.abspath(a.outfile)), exist_ok=True)

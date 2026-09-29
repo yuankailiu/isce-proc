@@ -164,5 +164,6 @@ def report(c, extra_ids=()):
     script = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'scripts', 'plot_report.py')
     subprocess.run([sys.executable, script, os.path.join(c.stack, 'logs', f'report_{stamp}.csv'),
                     '-o', os.path.join(c.stack, 'pic', 'report.png'), '--title', c.hpc.track,
-                    '--rate', str(c.hpc.costPerCpuHour), '--gpu-units', str(c.hpc.gpuUnits)])
+                    '--rate', str(c.hpc.costPerCpuHour), '--gpu-units', str(c.hpc.gpuUnits),
+                    '--campaign-gap', str(c.hpc.campaignGap)])
     return 0

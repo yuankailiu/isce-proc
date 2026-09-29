@@ -215,7 +215,7 @@ SCRIPT_OF = {'status': 'check_topsStack', 'clean': 'clean_topsStack', 'jobs': 'w
 KEYS_OF = {'search': ('asf.',), 'download': ('asf.',), 'inspect': ('asf.dataDir',),
            'select': ('asf.dataDir', 'select.southNorth', 'select.minAcq'), 'dem': ('dem.', 'isce.demFile'),
            'stack': ('isce.', 'select.numConnections', 'select.bridge', 'ion.'), 'jobs': ('hpc.',),
-           'submit': ('hpc.gate', 'hpc.gateSteps', 'hpc.diskSteps', 'hpc.excludeNodes'), 'report': ('hpc.costPerCpuHour', 'hpc.gpuUnits'), 'ionqc': ('isce.paramIonFile',),
+           'submit': ('hpc.gate', 'hpc.gateSteps', 'hpc.diskSteps', 'hpc.excludeNodes'), 'report': ('hpc.costPerCpuHour', 'hpc.gpuUnits', 'hpc.campaignGap'), 'ionqc': ('isce.paramIonFile',),
            'plot': ('hpc.track',), 'export': ('hpc.exportDir',), 'show': ('',)}
 
 

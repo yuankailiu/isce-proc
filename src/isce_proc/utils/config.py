@@ -96,6 +96,7 @@ hpc.costPerCpuHour      = auto                       #$ per compute unit (1 CPU 
 hpc.gpuUnits            = auto                       #compute units per GPU hour (V100/P100 10, L40S 61, H100 120, H200 156), auto for 10
 hpc.gateSteps           = auto                       #steps followed by a gate (hpc.gate = yes), or all; the last submitted step always gets one
 hpc.diskSteps           = auto                       #steps followed by a disk_usage job, or all
+hpc.campaignGap         = auto                       #days without any array task that separate processing campaigns in `report` (not wall time), auto for 14
 hpc.excludeNodes        = auto                       #nodes to avoid (#SBATCH --exclude), e.g. hpc-21-14,hpc-21-15, auto for none
 """
 
@@ -185,4 +186,5 @@ AUTO_DICT = {
     # disk_usage after steps that write most of the data
     'hpc.diskSteps'           : '1,10,12,13,14,15,16,17,18,19,20,22,27,28',
     'hpc.excludeNodes'        : '',
+    'hpc.campaignGap'         : 14,
 }
