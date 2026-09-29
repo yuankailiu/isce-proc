@@ -1,7 +1,7 @@
 """`topsstack.py report`: per-step time, CPU, memory, cost and disk use, from sacct.
 
-Job IDs come from run_files/job_id_logfile_*.txt (all submissions), from sacct by job name
-(<n>_<step>_<track>, e.g. steps submitted by hand) since the stack's first log, plus any extra IDs given. Nothing is read from the per-task timings.txt appends.
+Job IDs come from run_files/job_id_logfile_*.txt (all submissions), from the Slurm logs kept in the
+stack (steps submitted by hand, stacks processed under another directory and moved), plus any extra IDs. Nothing is read from the per-task timings.txt appends.
 """
 import csv
 import glob
@@ -38,32 +38,27 @@ def _job_ids(run_files):
     return out
 
 
-def _ids_by_name(c, run_files, since):
-    """(step, jobid) of this track's step jobs found by name in sacct since `since` (YYYY-MM-DD)."""
-    steps = [os.path.basename(f) for f in glob.glob(os.path.join(run_files, 'run_[0-9][0-9]_*')) if '.' not in os.path.basename(f)]
-    name = {f'{int(s[4:6])}_{s[7:]}_{c.hpc.track}': s for s in steps}
-    if not name:
-        return []
-    out = subprocess.run(['sacct', '-u', os.environ.get('USER', ''), '-S', since, '-X', '--noheader', '--parsable2',
-                          f'--name={",".join(name)}', '--format=JobID,JobName%80,WorkDir%300'],
-                         capture_output=True, text=True).stdout
+def _ids_by_logs(stack):
+    """(step, job array ID) from the Slurm logs kept in this stack (run_files/, run_files/log_files/, past_bak/).
+
+    The logs move with the stack, so this also works for stacks processed under another directory
+    name and moved later (north/south segments share job names and working directories)."""
     ids = {}
-    here = os.path.realpath(c.stack)
-    for line in out.splitlines():
-        jid, jname, wdir = (line.split('|') + ['', ''])[:3]
-        # north and south stacks of a track share job names: keep jobs that ran in this stack
-        if jname in name and os.path.realpath(wdir or '/').startswith(here):
-            ids.setdefault(jid.split('_')[0], name[jname])
+    for root, _, files in os.walk(stack):
+        if root[len(stack):].count(os.sep) > 3:
+            continue
+        for f in files:
+            m = re.match(r'slurm-(run_\d+_\w+?)-(\d+)_\d+(?:\.p\d+)?\.out$', f)
+            if m:
+                ids.setdefault(m[2], m[1])
     return [(s, j) for j, s in ids.items()]
 
 
 def report(c, extra_ids=()):
     run_files = os.path.join(c.stack, 'run_files')
     ids = _job_ids(run_files)
-    logs = glob.glob(os.path.join(run_files, 'job_id_logfile_*.txt')) or [run_files]
-    since = datetime.fromtimestamp(min(os.path.getmtime(f) for f in logs) - 86400 * 30).strftime('%Y-%m-%d')
     known = {j for _, j in ids}
-    ids += [(s, j) for s, j in _ids_by_name(c, run_files, since) if j not in known]
+    ids += [(s, j) for s, j in _ids_by_logs(c.stack) if j not in known]
     name_of = {j: s for s, j in ids}
     all_ids = [j for _, j in ids] + list(extra_ids)
     if not all_ids:

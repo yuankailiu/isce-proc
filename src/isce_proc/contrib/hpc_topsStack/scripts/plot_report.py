@@ -85,7 +85,25 @@ def main():
     unit = lambda x: float(x['wall_s']) / 3600 * (float(x['ncpu']) + float(x['ngpu']) * a.gpu_units)
     RERUN = '#E0A458'                                            # muted amber: failed / cancelled / repeated work
 
-    # 1. timeline: one bar per job array of the step (sub-rows), red if most of its array tasks did not complete
+    # 1. timeline: one bar per job array of the step (sub-rows), amber if most of its array tasks did not complete.
+    # Idle periods longer than GAP_DAYS (e.g. a rerun a year later) are cut out of the axis and marked.
+    GAP_DAYS = 3
+    iv = sorted((ts(x['start']), ts(x['end'])) for t in tasks.values() for x in t if ts(x['start']) and ts(x['end']))
+    segs = []
+    for s_, e_ in iv:
+        if segs and (s_ - segs[-1][1]).total_seconds() <= GAP_DAYS * 86400:
+            segs[-1][1] = max(segs[-1][1], e_)
+        else:
+            segs.append([s_, e_])
+    seglen = [mdates.date2num(e_) - mdates.date2num(s_) for s_, e_ in segs] or [1]
+    spacer = 0.06 * sum(seglen) if len(segs) > 1 else 0
+    offs = np.concatenate([[0], np.cumsum([l + spacer for l in seglen])])
+    def X(t):                                                    # date -> compressed axis coordinate
+        d = mdates.date2num(t)
+        for k, (s_, e_) in enumerate(segs):
+            if d <= mdates.date2num(e_) or k == len(segs) - 1:
+                return offs[k] + max(d - mdates.date2num(s_), 0)
+        return d
     for yi, hr, r, c in zip(y, hrow, steps, colors):
         arrays = defaultdict(list)
         for x in tasks.get(r['step'], []):
@@ -95,25 +113,40 @@ def main():
         k = max(len(arrays), 1)
         if arrays:                                               # light band: the whole step span, idle gaps included
             s1, e1 = min(ts(x['start']) for t in arrays for x in t), max(ts(x['end']) for t in arrays for x in t)
-            ax1.barh(yi, mdates.date2num(e1) - mdates.date2num(s1), left=mdates.date2num(s1), height=hr - 0.12,
+            ax1.barh(yi, X(e1) - X(s1), left=X(s1), height=hr - 0.12,
                      color=c, alpha=0.12, lw=0)
         hgt = (hr - 0.2) / k
         for m, t in enumerate(arrays):
             s0_, e0_ = min(ts(x['start']) for x in t), max(ts(x['end']) for x in t)
             frac = sum(map(done, t)) / len(t)
-            ax1.barh(yi + (hr - 0.2) / 2 - hgt * (m + 0.5), max(mdates.date2num(e0_) - mdates.date2num(s0_), 0.035),
-                     left=mdates.date2num(s0_), height=hgt * 0.9, color=c if frac >= 0.5 else RERUN, alpha=0.9, lw=0)
+            ax1.barh(yi + (hr - 0.2) / 2 - hgt * (m + 0.5), max(X(e0_) - X(s0_), 0.004 * offs[-1]),
+                     left=X(s0_), height=hgt * 0.9, color=c if frac >= 0.5 else RERUN, alpha=0.9, lw=0)
         e = ts(r['end'])
-        if e:
-            h = float(r['wall_span_h'])
-            ax1.text(mdates.date2num(e) + 0.04, yi, (f'{h:.1f} h' if h >= 1 else f'{h * 60:.0f} min')
+        if e and arrays:
+            k0 = next(k for k, (s_, e_) in enumerate(segs) if s1 <= e_)
+            k1 = next(k for k, (s_, e_) in enumerate(segs) if e1 <= e_)
+            h = (X(e1) - X(s1) - spacer * (k1 - k0)) * 24             # active hours: idle gaps cut out
+            ax1.text(X(e) + 0.006 * offs[-1], yi, (f'{h:.1f} h' if h >= 1 else f'{h * 60:.0f} min')
                      + (f', {len(arrays)} arrays' if len(arrays) > 1 else ''), va='center', fontsize=10.5, color='0.25')
-    ax1.xaxis_date()
-    lo, hi = ax1.get_xlim()
-    ax1.set_xlim(lo, hi + 0.26 * (hi - lo))                      # room for the labels of the last steps
-    days = hi - lo
-    ax1.xaxis.set_major_locator(mdates.DayLocator(interval=max(1, int(np.ceil(days / 6)))))
-    ax1.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))
+    ax1.set_xlim(-0.02 * offs[-1], offs[-1] * 1.26)               # room for the labels of the last steps
+    ticks, tlabels = [], []
+    for k, (s_, e_) in enumerate(segs):
+        step_d = max(1, int(np.ceil(seglen[k] / max(2, 6 * seglen[k] / sum(seglen)))))
+        d0 = mdates.date2num(datetime(s_.year, s_.month, s_.day)) + 1
+        ticks.append(offs[k])
+        tlabels.append(s_.strftime('%m-%d' if len(segs) == 1 else '%y-%m-%d'))
+        for d in np.arange(d0 + (step_d - 1 if len(segs) > 1 else 0), mdates.date2num(e_) + 1e-9, step_d):
+            if ticks and offs[k] + d - mdates.date2num(s_) - ticks[-1] < 0.08 * offs[-1]:
+                continue
+            ticks.append(offs[k] + d - mdates.date2num(s_))
+            tlabels.append(mdates.num2date(d).strftime('%m-%d' if len(segs) == 1 else '%y-%m-%d'))
+        if k < len(segs) - 1:                                    # break mark: idle gap cut out
+            xb = offs[k] + seglen[k] + spacer / 2
+            ax1.axvline(xb, c='0.45', lw=1.2, ls=(0, (4, 3)))
+            ax1.text(xb, 1.0, f'{(segs[k + 1][0] - e_).days} d idle', transform=ax1.get_xaxis_transform(),
+                     ha='center', va='bottom', fontsize=10, color='0.35')
+    ax1.set_xticks(ticks)
+    ax1.set_xticklabels(tlabels, rotation=30 if len(segs) > 1 else 0, ha='right' if len(segs) > 1 else 'center')
     ax1.set_yticks(y)
     ax1.set_yticklabels(labels, fontsize=12)
     ax1.set_xlabel('date\n(bar: job array; band: step span incl. idle gaps)')
@@ -198,10 +231,12 @@ def main():
     s0 = min(ts(r['start']) for r in steps if ts(r['start']))
     e0 = max(ts(r['end']) for r in steps if ts(r['end']))
     fig.suptitle(f'{a.title}   {n} steps, {nrows:,} rows, {ntask:,} array tasks   '
-                 f'{(e0 - s0).total_seconds() / 86400:.1f} days ({s0:%Y-%m-%d} to {e0:%Y-%m-%d})   '
                  f'{cpu_h:,.0f} CPU core-h + {gpu_h:,.0f} GPU h = {units:,.0f} units   '
-                 f'\\${units * a.rate:,.0f} at \\${a.rate:g} / unit', fontsize=15, y=0.995)
-    fig.subplots_adjust(left=0.178, right=0.875, top=1 - 0.8 / fig.get_figheight(), bottom=1.05 / fig.get_figheight())
+                 f'\\${units * a.rate:,.0f} at \\${a.rate:g} / unit\n'
+                 + (f'{(e0 - s0).total_seconds() / 86400:.1f} days ({s0:%Y-%m-%d} to {e0:%Y-%m-%d})   ' if len(segs) == 1 else
+                    f'{sum(seglen):.1f} active days in {len(segs)} periods ({s0:%Y-%m-%d} to {e0:%Y-%m-%d})   ')
+                 , fontsize=15, y=0.998)
+    fig.subplots_adjust(left=0.178, right=0.875, top=1 - 1.15 / fig.get_figheight(), bottom=(1.05 if len(segs) == 1 else 1.45) / fig.get_figheight())
     os.makedirs(os.path.dirname(os.path.abspath(a.outfile)), exist_ok=True)
     fig.savefig(a.outfile, dpi=150)
     print(f'{units:,.0f} units, ${units * a.rate:,.2f} -> {a.outfile}')
