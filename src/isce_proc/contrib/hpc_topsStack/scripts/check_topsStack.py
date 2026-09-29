@@ -99,7 +99,8 @@ def check_row(cmd):
                 bad.append(f'{path}: no burst interferograms')
             bad += [f'{f}: {r}' for f in sorted(files) for r in [check_file(f)] if r]
         elif kind == 'overlap_dir':
-            ints = sorted(glob.glob(os.path.join(path, 'overlap', 'IW*', 'int_*.int')))
+            ints = sorted({f[:-4] for f in glob.glob(os.path.join(path, 'overlap', 'IW*', 'int_*.int.xml'))} |
+                          set(glob.glob(os.path.join(path, 'overlap', 'IW*', 'int_*.int'))))   # .xml left: 'cleaned'
             if not ints:
                 bad.append(f'{path}: no overlap interferograms')
             bad += [f'{f}: {r}' for f in ints for r in [check_file(f)] if r]
