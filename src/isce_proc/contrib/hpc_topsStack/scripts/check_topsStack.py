@@ -328,8 +328,11 @@ def final_mail(last, args):
         cmds, bad, n_cl = evaluate(r, args)
         lines.append(f'  {r:40s} rows {len(cmds):5d}  bad {len(bad):5d}  cleaned {n_cl:5d}')
     bin_ = os.environ.get('TOPSSTACK_BIN')                  # set in gate.job
-    rep = subprocess.run([sys.executable, bin_, 'report', template], capture_output=True, text=True, cwd=stack) \
-        if bin_ and template != '<template>' else None
+    try:                                                   # never let the report keep the mail from being sent
+        rep = subprocess.run([sys.executable, bin_, 'report', template], capture_output=True, text=True, cwd=stack,
+                             timeout=900) if bin_ and template != '<template>' else None
+    except subprocess.TimeoutExpired:
+        rep = None
     report = rep.stdout if rep and rep.returncode == 0 else '(report not available; run `topsstack.py report` in the stack)'
     body = f"""The topsStack chain of {track} finished: the last submitted step, {last}, passed its check.
 

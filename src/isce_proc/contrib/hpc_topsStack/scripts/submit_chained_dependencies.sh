@@ -226,8 +226,8 @@ for ((i=0;i<${num_file};i++)); do
     next=$(basename "${sbatch_files[i+1]:-none}" | cut -d. -f1)
     if [ "$run_file" != "$next" ]; then                        # last part of this step
         if $gate && { listed gate_steps.txt "$run_file" || [ "$next" = "none" ]; }; then   # last step: summary mail
-            final=""; [ "$next" = "none" ] && final=",GATE_FINAL=1"
-            G=$(sbatch --parsable --dependency=afterany:${step_parts} --export=ALL,STEP="${run_file}"${final} gate.job)
+            final=""; tl=""; [ "$next" = "none" ] && final=",GATE_FINAL=1" && tl="--time=2:00:00"   # checks all steps + report
+            G=$(sbatch --parsable $tl --dependency=afterany:${step_parts} --export=ALL,STEP="${run_file}"${final} gate.job)
             printf "$fmt_id" "gate_${run_file}" "$G" >> "${id_logfile}"
             echo "  gate after ${run_file} - $G"
             dep="afterok:${G}"
