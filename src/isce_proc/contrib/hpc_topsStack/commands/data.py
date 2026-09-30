@@ -162,10 +162,11 @@ def download(c, needed=False, shard=None, verify=False, dry_run=False, nproc=Non
             cat[p['fileName'][:-4]] = (p['fileName'], int(p['bytes']), p['url'])
     items = [cat[x] for x in names if x in cat]
     path = lambda it: os.path.join(c.data, it[0])
-    ok = lambda it: os.path.exists(path(it)) and os.path.getsize(path(it)) == it[1]
+    moved = lambda it: os.path.join(c.data, 'not_used', it[0])  # set aside by `select`: present, not wanted again
+    ok = lambda it: any(os.path.exists(p) and os.path.getsize(p) == it[1] for p in (path(it), moved(it)))
     todo = [it for it in items if not ok(it)]
     if verify:
-        have = [it for it in items if ok(it)]
+        have = [it for it in items if ok(it) and os.path.exists(path(it))]   # not_used/ zips are not re-checked
         with ThreadPoolExecutor(nproc or c.asf.processes) as ex:
             bad = [it for it, good in zip(have, ex.map(lambda it: _crc_ok(path(it)), have)) if not good]
         print(f'CRC check: {len(bad)} of {len(have)} complete-size zips fail')
