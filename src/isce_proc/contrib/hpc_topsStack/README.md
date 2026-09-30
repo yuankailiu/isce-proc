@@ -107,6 +107,7 @@ topsstack.py stack ChileSenAT120.txt                    # stackSentinel.py -> co
 topsstack.py stack ChileSenAT120.txt --ion-config       # ionosphere only: water body, masks
 topsstack.py stack ChileSenAT120.txt --select-pairs 5 10   # optional: keep 5 nearest pairs + 10-date bridge
                                                         # (automatic in `stack` if select.numConnections is set)
+topsstack.py stack ChileSenAT120.txt --add-pairs pairs.txt  # optional: extra pairs, e.g. same-season bridges over a data gap
 ```
 
 `--ion-config` sets the filtIon keys (`wbdfile`, `iteration 5`, `fill nearest`; `swath_align` only if

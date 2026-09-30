@@ -133,6 +133,8 @@ def cmd_dem(c, extra):
 def cmd_stack(c, extra):
     ap = argparse.ArgumentParser(prog='topsstack.py stack TEMPLATE')
     ap.add_argument('--ion-config', action='store_true', help='set filtIon/burstRampIon config keys from ion.* (idempotent)')
+    ap.add_argument('--add-pairs', metavar='FILE', help='add the pairs listed in FILE (YYYYMMDD_YYYYMMDD) to steps 13-16, '
+                    'e.g. same-season pairs across a data gap; kept by --select-pairs (run_files/extra_pairs.txt)')
     ap.add_argument('--select-pairs', nargs='*', type=int, metavar=('N', 'BRIDGE'),
                     help='thin steps 13-16 to N nearest pairs (+ one BRIDGE dates ahead); done by `stack` itself '
                          'if select.numConnections is set '
@@ -140,6 +142,8 @@ def cmd_stack(c, extra):
     a, rest = ap.parse_known_args(extra)
     if a.ion_config:
         return stack.ion_config(c)
+    if a.add_pairs:
+        return stack.add_pairs(c, a.add_pairs)
     if a.select_pairs is not None:
         rc = stack.select_pairs(c, *a.select_pairs[:2])
     else:

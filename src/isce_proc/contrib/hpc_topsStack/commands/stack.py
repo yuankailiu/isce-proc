@@ -117,6 +117,7 @@ def select_pairs(c, num=None, bridge=None):
     dates = _dates(c)
     keep = {f'{dates[i]}_{dates[j]}' for i in range(len(dates))
             for j in list(range(i + 1, i + 1 + num)) + [i + bridge] if j < len(dates)}
+    keep |= _extra_pairs(c)                                      # added with --add-pairs: always kept
     run_dir = os.path.join(c.stack, 'run_files')
     pre = os.path.join(run_dir, 'preselect')
     os.makedirs(pre, exist_ok=True)
@@ -139,3 +140,59 @@ def select_pairs(c, num=None, bridge=None):
         log.write(f'## select-pairs: {msg}\n')
     print(msg + '\nre-run `topsstack.py jobs` so the job arrays match the new row counts')
     return 0
+
+
+# ---------------------------------------------------------------- extra pairs (e.g. same-season bridges)
+def _extra_pairs(c):
+    f = os.path.join(c.stack, 'run_files', 'extra_pairs.txt')
+    return set(open(f).read().split()) if os.path.isfile(f) else set()
+
+
+def add_pairs(c, pair_file):
+    """Add interferogram pairs that stackSentinel.py did not make (e.g. same-season pairs across a data gap).
+
+    For each pair D1_D2 (D1 < D2, both coregistered, neither the stack reference date) the four configs of
+    steps 13-16 are copied from an existing pair of the same kind with the dates replaced, and the rows are
+    appended to the run files (and to run_files/preselect/, so --select-pairs keeps them). The pairs are
+    recorded in run_files/extra_pairs.txt. Idempotent: pairs already present are skipped.
+    Needs, for the old dates: coreg_secondarys/<date>/IW*/burst_*.slc (step 13) and merged/SLC/<date> (step 15)."""
+    run_dir = os.path.join(c.stack, 'run_files')
+    want = sorted({p for p in open(pair_file).read().split() if re.fullmatch(r'\d{8}_\d{8}', p)})
+    cfg = os.path.join(c.stack, 'configs')
+    rows = {step: open(os.path.join(run_dir, f)).read() for f in os.listdir(run_dir)
+            for step in [re.sub(r'^run_\d+_', '', f)] if re.fullmatch(r'run_\d+_\w+', f) and step in PAIR_STEPS}
+    # template: an existing pair whose first date is a coregistered secondary (not the stack reference)
+    tmpl = next(os.path.basename(f)[len('config_generate_igram_'):] for f in sorted(glob.glob(os.path.join(cfg, 'config_generate_igram_*')))
+                if 'coreg_secondarys' in open(f).read().split('reference :')[1].split('\n')[0])
+    t1, t2 = tmpl.split('_')
+    added, missing = [], []
+    for p in want:
+        d1, d2 = p.split('_')
+        need = [os.path.join(c.stack, 'coreg_secondarys', d) for d in (d1, d2)] + \
+               [os.path.join(c.stack, 'merged', 'SLC', d) for d in (d1, d2)]
+        if not all(os.path.isdir(x) for x in need):
+            missing.append(p)
+            continue
+        if all(f'{PAIR_STEPS[s]}{p}' in txt for s, txt in rows.items()):
+            continue
+        for step, prefix in PAIR_STEPS.items():
+            src = os.path.join(cfg, f'{prefix}{tmpl}')
+            dst = os.path.join(cfg, f'{prefix}{p}')
+            text = open(src).read().replace(f'{t1}_{t2}', p).replace(f'/{t1}', f'/{d1}').replace(f'/{t2}', f'/{d2}')
+            text = text.replace(f'{t1}.slc', f'{d1}.slc').replace(f'{t2}.slc', f'{d2}.slc')
+            open(dst, 'w').write(text)
+            line = f'SentinelWrapper.py -c {dst}\n'
+            for f in [f for f in os.listdir(run_dir) if re.fullmatch(rf'run_\d+_{step}', f)]:
+                for path in (os.path.join(run_dir, f), os.path.join(run_dir, 'preselect', f)):
+                    if os.path.isfile(path) and dst not in open(path).read():
+                        with open(path, 'a') as out:
+                            out.write(line)
+        added.append(p)
+    with open(os.path.join(run_dir, 'extra_pairs.txt'), 'a') as f:
+        f.write(''.join(p + '\n' for p in added))
+    msg = f'add-pairs: {len(added)} added, {len(want) - len(added) - len(missing)} already present, {len(missing)} skipped ' \
+          f'(dates not coregistered/merged yet: {missing[:5]}{"..." if len(missing) > 5 else ""}); template {tmpl}'
+    with _log(c, 'stack') as log:
+        log.write(f'## {msg}\n')
+    print(msg + '\nre-run `topsstack.py jobs` so the job arrays match the new row counts')
+    return 1 if missing else 0
