@@ -79,7 +79,9 @@ def load(template):
     for k in ('gateSteps', 'diskSteps'):                    # '1,5,7' -> '1 5 7' (for the submit script); or 'all'
         v = getattr(c.hpc, k)
         v = ','.join(v) if isinstance(v, (list, tuple)) else str(v)
-        setattr(c.hpc, k, 'all' if v.strip().lower() == 'all' else ' '.join(str(int(x)) for x in v.replace(',', ' ').split()))
+        # step names (stable when an update stack renumbers its run files) or numbers
+        setattr(c.hpc, k, 'all' if v.strip().lower() == 'all' else
+                ' '.join(str(int(x)) if x.isdigit() else x for x in v.replace(',', ' ').split()))
     return c
 
 

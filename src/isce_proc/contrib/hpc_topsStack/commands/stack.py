@@ -154,8 +154,10 @@ def add_pairs(c, pair_file):
     For each pair D1_D2 (D1 < D2, both coregistered, neither the stack reference date) the four configs of
     steps 13-16 are copied from an existing pair of the same kind with the dates replaced, and the rows are
     appended to the run files (and to run_files/preselect/, so --select-pairs keeps them). The pairs are
-    recorded in run_files/extra_pairs.txt. Idempotent: pairs already present are skipped.
-    Needs, for the old dates: coreg_secondarys/<date>/IW*/burst_*.slc (step 13) and merged/SLC/<date> (step 15)."""
+    recorded in run_files/extra_pairs.txt. Idempotent: pairs already present are skipped. Both dates must be in
+    the stack (SAFE_files.txt); new dates may still be unprocessed (steps 1-12 make them before the pair steps).
+    Needs, for old dates: coreg_secondarys/<date>/IW*/burst_*.slc (generate_burst_igram) and merged/SLC/<date>
+    (filter_coherence), i.e. do not clean burst_slc / merged_slc before these pairs ran."""
     run_dir = os.path.join(c.stack, 'run_files')
     want = sorted({p for p in open(pair_file).read().split() if re.fullmatch(r'\d{8}_\d{8}', p)})
     cfg = os.path.join(c.stack, 'configs')
@@ -165,13 +167,13 @@ def add_pairs(c, pair_file):
     tmpl = next(os.path.basename(f)[len('config_generate_igram_'):] for f in sorted(glob.glob(os.path.join(cfg, 'config_generate_igram_*')))
                 if 'coreg_secondarys' in open(f).read().split('reference :')[1].split('\n')[0])
     t1, t2 = tmpl.split('_')
+    stack_dates = set(_dates(c))                                 # dates of this stack (coregistered or to be)
+    ref_date = min(stack_dates)
     added, missing = [], []
     for p in want:
         d1, d2 = p.split('_')
-        need = [os.path.join(c.stack, 'coreg_secondarys', d) for d in (d1, d2)] + \
-               [os.path.join(c.stack, 'merged', 'SLC', d) for d in (d1, d2)]
-        if not all(os.path.isdir(x) for x in need):
-            missing.append(p)
+        if not {d1, d2} <= stack_dates or ref_date in (d1, d2):
+            missing.append(p)                                    # not in the stack (or the reference: other template)
             continue
         if all(f'{PAIR_STEPS[s]}{p}' in txt for s, txt in rows.items()):
             continue
@@ -191,7 +193,7 @@ def add_pairs(c, pair_file):
     with open(os.path.join(run_dir, 'extra_pairs.txt'), 'a') as f:
         f.write(''.join(p + '\n' for p in added))
     msg = f'add-pairs: {len(added)} added, {len(want) - len(added) - len(missing)} already present, {len(missing)} skipped ' \
-          f'(dates not coregistered/merged yet: {missing[:5]}{"..." if len(missing) > 5 else ""}); template {tmpl}'
+          f'(a date not in this stack, or the reference: {missing[:6]}{"..." if len(missing) > 6 else ""}); template {tmpl}'
     with _log(c, 'stack') as log:
         log.write(f'## {msg}\n')
     print(msg + '\nre-run `topsstack.py jobs` so the job arrays match the new row counts')

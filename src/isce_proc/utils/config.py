@@ -94,8 +94,8 @@ hpc.gpuType             = auto                       #GPU type for GPU steps (is
 hpc.exportDir           = auto                       #target of `topsstack.py export`, auto for none
 hpc.costPerCpuHour      = auto                       #$ per compute unit (1 CPU core-hour) for `topsstack.py report`, auto for 0.012 (Resnick tier 1, FY rates)
 hpc.gpuUnits            = auto                       #compute units per GPU hour (V100/P100 10, L40S 61, H100 120, H200 156), auto for 10
-hpc.gateSteps           = auto                       #steps followed by a gate (hpc.gate = yes), or all; the last submitted step always gets one
-hpc.diskSteps           = auto                       #steps followed by a disk_usage job, or all
+hpc.gateSteps           = auto                       #steps (names, e.g. unwrap, or numbers) followed by a gate, or all; the last submitted step always gets one
+hpc.diskSteps           = auto                       #steps (names or numbers) followed by a disk_usage job, or all
 hpc.campaignGap         = auto                       #days without any array task that separate processing campaigns in `report` (not wall time), auto for 14
 hpc.excludeNodes        = auto                       #nodes to avoid (#SBATCH --exclude), e.g. hpc-21-14,hpc-21-15, auto for none
 """
@@ -182,9 +182,13 @@ AUTO_DICT = {
     'hpc.gpuUnits'            : 10,
     # gate after steps that failed before (a076 2026-09: 1, 7, 13, 15, 18-20, 24, 27) or that precede an
     # expensive step (5->6, 9->10, 16->17, 17->18); the others are short and never failed
-    'hpc.gateSteps'           : '1,5,7,9,13,15,16,17,18,19,20,24,27',
+    'hpc.gateSteps'           : 'unpack_topo_reference,overlap_geo2rdr,pairs_misreg,fullBurst_geo2rdr,generate_burst_igram,'
+                                'filter_coherence,unwrap,subband_and_resamp,generateIgram_ion,mergeBurstsIon,unwrap_ion,'
+                                'invertIon,burstRampIon',
     # disk_usage after steps that write most of the data
-    'hpc.diskSteps'           : '1,10,12,13,14,15,16,17,18,19,20,22,27,28',
+    'hpc.diskSteps'           : 'unpack_topo_reference,fullBurst_resample,merge_reference_secondary_slc,generate_burst_igram,'
+                                'merge_burst_igram,filter_coherence,unwrap,subband_and_resamp,generateIgram_ion,mergeBurstsIon,'
+                                'unwrap_ion,computeIon,burstRampIon,mergeBurstRampIon',
     'hpc.excludeNodes'        : '',
     'hpc.campaignGap'         : 14,
 }

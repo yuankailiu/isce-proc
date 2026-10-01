@@ -240,8 +240,9 @@ def write_job_scripts(inps):
         # mergeSwathIon.py rows that need them; parts run one after another) and at the array limit
         parts = row_parts(open(step_script).read().splitlines())
         num_sbatch = len(parts)
-        gate_list = None if inps.gate_steps.strip() == 'all' else {int(x) for x in inps.gate_steps.replace(',', ' ').split()}
-        gated = lambda num, last: inps.gate is not None and (last or gate_list is None or int(str(num).split('_')[-1]) in gate_list)
+        gate_list = None if inps.gate_steps.strip() == 'all' else set(inps.gate_steps.replace(',', ' ').split())
+        gated = lambda num, last: inps.gate is not None and (last or gate_list is None or
+                                                             str(int(str(num).split('_')[-1])) in gate_list or step_name in gate_list)
         for i, (row_id0, task_id1) in enumerate(parts):
             # use ROWINDEX, instead of SLURM_ARRAY_TASK_ID, to select line of interest
             # link: https://stackoverflow.com/questions/67908698/submitting-slurm-array-job-with-a-limit-above-maxarraysize

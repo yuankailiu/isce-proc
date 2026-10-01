@@ -177,9 +177,9 @@ printf "$fmt" "# Stage" "Job ID" "Array ID" "Start (s)" "Finish (s)" "Elapsed (s
 # gate_steps.txt / disk_steps.txt (topsstack.py jobs): step numbers, or "all"; missing file = all steps
 listed() { # $1: list file, $2: run file name (run_13_...)
     [ -f "$1" ] || return 0
-    local n=$((10#$(echo "$2" | cut -d_ -f2)))
+    local n=$((10#$(echo "$2" | cut -d_ -f2))) name=$(echo "$2" | cut -d_ -f3-)
     grep -qw all "$1" && return 0
-    tr ' ,' '\n\n' < "$1" | grep -qx "$n"
+    tr ' ,' '\n\n' < "$1" | grep -qxE "$n|$name"
 }
 disk_after() { # $1: index of the job just submitted, $2: its job ID
     local this next
