@@ -460,8 +460,7 @@ def prep_stack(iDict):
                 num_proc = max(num_proc, 1)    # ensure the num_proc >= 1
             iargs += ['--num_proc4topo', str(num_proc)]
 
-        if iDict['updateMode']:
-            iargs += ['--update']
+        # no --update: stackSentinel.py updates by itself when coreg_secondarys/ exists (only new dates are added)
 
         if iDict['paramIonFile']:
             iargs += ['--param_ion', iDict['paramIonFile'], '--num_connections_ion', iDict['numConnectionIon']]
