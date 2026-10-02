@@ -7,7 +7,7 @@
 # (split into .pN parts above the array limit), a disk-usage job, and run_atTheEnd.sh.
 # Then submit with:  cd run_files; bash submit_chained_dependencies.sh
 
-import argparse
+import argparse, glob
 import os
 import shutil
 import subprocess
@@ -134,6 +134,11 @@ def cmdLineParse():
                         help = 'request no GPU for any step (isce.useGPU = no)')
     parser.add_argument('--template', dest='track_template', type=str, default=None,
                         help = 'track template; run_atTheEnd.sh then calls `topsstack.py report` with it')
+    parser.add_argument('--fuse-merge', dest='fuse_merge', action='store_true',
+                        help='no job for generate_burst_igram: each merge_burst_igram task generates its pair, merges it and '
+                             'deletes the burst interferograms (peak disk: running tasks only, not all pairs)')
+    parser.add_argument('--fuse-mem', dest='fuse_mem', type=str, default='8G',
+                        help='memory per CPU of the fused task (default: %(default)s; merge max RSS 3.3 GB on d083/a076)')
     parser.add_argument('--exclude', dest='exclude', type=str, default='',
                         help='nodes to avoid, e.g. hpc-21-14,hpc-21-15 (tasks there failed at start: exit 0:53, no log)')
     parser.add_argument('--account', dest='account', type=str, default=GROUPNAME,
@@ -200,6 +205,45 @@ def deletion_lines(clean):
             for n, t in attach.items()}
 
 
+def add_times(a, b):
+    """Sum of two Slurm times ([D-]HH:MM:SS, MM:SS) as H:MM:SS."""
+    def sec(t):
+        d, _, t = t.rpartition('-')
+        p = [int(x) for x in t.split(':')]
+        p = [0] * (3 - len(p)) + p
+        return (int(d) if d else 0) * 86400 + p[0] * 3600 + p[1] * 60 + p[2]
+    s = sec(a) + sec(b)
+    return f'{s // 3600}:{s % 3600 // 60:02d}:{s % 60:02d}'
+
+
+FUSED = """cmd=$(sed "${{ROWINDEX}}q;d" {merge})
+# fused (write_slurmJobs.py --fuse-merge): generate this pair's burst interferograms, merge them, delete them
+pair=$(echo "$cmd" | grep -oE '[0-9]{{8}}_[0-9]{{8}}' | tail -1)
+gen=$(grep -m1 -E "config_generate_igram_${{pair}}$" {gen})
+idir=$(awk -F' : ' '/^inp_reference/{{print $2}}' "${{cmd##* }}")
+echo "Running: ${{gen}}" | tee -a $logfile
+srun $gen 2>&1
+rc=$?
+if [ $rc -eq 0 ]; then
+    echo "Running: ${{cmd}}" | tee -a $logfile
+    srun $cmd 2>&1
+    rc=$?
+fi
+if [ $rc -eq 0 ] && [ -n "$idir" ] && [ -d "$idir" ]; then
+    find "$idir" -name 'fine_*.int' -type f -delete         # merged: keep only .xml/.vrt ('cleaned' in status)
+    echo "deleted burst interferograms of $pair" | tee -a $logfile
+fi"""
+
+
+def fuse_generate(text, merge_script, gen_script):
+    """Replace the single-command block of the merge job by generate + merge + delete for the row's pair."""
+    import re
+    pat = re.compile(r'^cmd=\$\(sed "\$\{ROWINDEX\}q;d" ' + re.escape(merge_script) + r'\)\n.*?^rc=\$\?$', re.M | re.S)
+    if not pat.search(text):
+        raise ValueError('job template changed: cannot fuse generate_burst_igram into merge_burst_igram')
+    return pat.sub(lambda m: FUSED.format(merge=merge_script, gen=gen_script), text, count=1)
+
+
 def write_job_scripts(inps):
     print(f'>> Writing SLURM job scripts for {inps.track_no}')
 
@@ -215,16 +259,27 @@ def write_job_scripts(inps):
     deletions = deletion_lines(inps.clean)
 
     # Iterate over the run files, write an sbatch file for each one
+    gen_script = next((x for x in step_scripts if x[7:] == 'generate_burst_igram'), None)
     for index, step_script in enumerate(step_scripts):
         # a table of steps
         step_num        = step_script[:6]
         step_name       = step_script[7:]
+        if inps.fuse_merge and step_name == 'generate_burst_igram':
+            for old_job in glob.glob(f'{step_script}*.job'):
+                os.remove(old_job)                       # its rows run inside merge_burst_igram
+            print(f' {step_script}: fused into merge_burst_igram (no job)')
+            continue
         row             = inps.rscDf[inps.rscDf['Step']==step_name]
         time            = row['Time'].item()
+        if inps.fuse_merge and step_name == 'merge_burst_igram' and gen_script:
+            gen_time = inps.rscDf[inps.rscDf['Step']=='generate_burst_igram']['Time'].item()
+            time = add_times(time, gen_time)
         nodes           = row['Nodes'].item()
         ntasks          = row['Ntasks'].item()
         ncpus_per_task  = row['Ncpus_per_task'].item()
         mem             = row['Mem_per_cpu'].item()
+        if inps.fuse_merge and step_name == 'merge_burst_igram' and gen_script:
+            mem = inps.fuse_mem
         gres            = row['Gres'].item()
         max_task        = row['batch'].item()
 
@@ -282,8 +337,11 @@ def write_job_scripts(inps):
 
             # Put variables from context dic into the slurm script template
             print(' '+slurm_name)
+            text = inps.template.format(**context)
+            if inps.fuse_merge and step_name == 'merge_burst_igram' and gen_script:
+                text = fuse_generate(text, step_script, gen_script)
             with open(slurm_name, 'w') as outf:
-                outf.write(inps.template.format(**context))
+                outf.write(text)
 
     with open('disk_usage.job', 'w') as outf:
         outf.write(DISK_JOB.format(groupname=inps.account, track=inps.track_no,
@@ -294,8 +352,11 @@ def write_job_scripts(inps):
                                        exclude_line=f'#SBATCH --exclude={inps.exclude}\n' if inps.exclude else '',
                                        retries=inps.gate, python=sys.executable, template=inps.track_template or '',
                                        topsstack=SCRIPT_DIR.parent / 'topsstack.py'))
+        gs = inps.gate_steps.strip()
+        if inps.fuse_merge and gs != 'all' and 'generate_burst_igram' in gs.split():
+            gs += ' merge_burst_igram'                   # the fused job carries generate_burst_igram's rows
         with open('gate_steps.txt', 'w') as outf:
-            outf.write(inps.gate_steps.strip() + '\n')
+            outf.write(gs + '\n')
         print(f' gate.job (reruns per step: {inps.gate}; after steps: {inps.gate_steps} + the last)')
     elif os.path.exists('gate.job'):
         os.remove('gate.job')                            # gate off: plain afterok chain

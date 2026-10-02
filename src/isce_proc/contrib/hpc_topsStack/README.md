@@ -110,6 +110,12 @@ topsstack.py stack ChileSenAT120.txt --select-pairs 5 10   # optional: keep 5 ne
 topsstack.py stack ChileSenAT120.txt --add-pairs pairs.txt  # optional: extra pairs, e.g. same-season bridges over a data gap
 ```
 
+Large stacks: `hpc.fuseMerge = yes` runs generate_burst_igram inside merge_burst_igram, pair by pair, and deletes
+each pair's burst interferograms after its merge, so the peak disk use is the running tasks, not all pairs.
+
+```bash
+```
+
 `--ion-config` sets the filtIon keys (`wbdfile`, `iteration 5`, `fill nearest`; `swath_align` only if
 `ion.swathAlign = yes`), the burstRampIon mask, and puts the `mergeSwathIon.py` rows of step 22 last.
 Safe to re-run.

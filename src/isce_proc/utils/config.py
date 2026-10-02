@@ -97,6 +97,7 @@ hpc.gpuUnits            = auto                       #compute units per GPU hour
 hpc.gateSteps           = auto                       #steps (names, e.g. unwrap, or numbers) followed by a gate, or all; the last submitted step always gets one
 hpc.diskSteps           = auto                       #steps (names or numbers) followed by a disk_usage job, or all
 hpc.campaignGap         = auto                       #days without any array task that separate processing campaigns in `report` (not wall time), auto for 14
+hpc.fuseMerge           = auto                       #[yes / no], generate+merge+delete each pair's burst interferograms in one task (low peak disk), auto for no
 hpc.excludeNodes        = auto                       #nodes to avoid (#SBATCH --exclude), e.g. hpc-21-14,hpc-21-15, auto for none
 """
 
@@ -190,5 +191,6 @@ AUTO_DICT = {
                                 'merge_burst_igram,filter_coherence,unwrap,subband_and_resamp,generateIgram_ion,mergeBurstsIon,'
                                 'unwrap_ion,computeIon,burstRampIon,mergeBurstRampIon',
     'hpc.excludeNodes'        : '',
+    'hpc.fuseMerge'           : False,
     'hpc.campaignGap'         : 14,
 }
