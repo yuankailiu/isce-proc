@@ -165,8 +165,10 @@ def cmd_export(c, extra):
     ap.add_argument('--dry-run', action='store_true', help='only list what would be copied, with sizes')
     ap.add_argument('-n', '--nproc', type=int, default=8,
                     help='parallel rsync jobs; the interferograms are split over them (default: %(default)s)')
+    ap.add_argument('--run-files-to', metavar='NAME',
+                    help='copy run_files/ to <exportDir>/NAME/ instead of <exportDir>/run_files/ (e.g. after a stack update)')
     a = ap.parse_args(extra)
-    return export.export(c, dry_run=a.dry_run, nproc=a.nproc)
+    return export.export(c, dry_run=a.dry_run, nproc=a.nproc, run_files_to=a.run_files_to)
 
 
 def cmd_ionqc(c, extra):

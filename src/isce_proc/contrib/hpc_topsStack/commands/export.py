@@ -29,7 +29,7 @@ ITEMS = [
 ]
 
 
-def export(c, dry_run=False, nproc=4):
+def export(c, dry_run=False, nproc=4, run_files_to=None):
     target = c.hpc.exportDir
     if not target:
         sys.exit('set hpc.exportDir in the template (target directory for the copy)')
@@ -37,6 +37,10 @@ def export(c, dry_run=False, nproc=4):
         os.makedirs(target, exist_ok=True)
     jobs = []
     for pattern, opts in ITEMS:
+        if pattern == 'run_files' and run_files_to:            # e.g. an update stack: keep the target's run_files/
+            jobs.append((f'run_files -> {run_files_to}', ['rsync', '-a', *(['-n'] if dry_run else []), '--stats', *opts,
+                                                          'run_files/', os.path.join(target, run_files_to) + '/']))
+            continue
         srcs = sorted(glob.glob(os.path.join(c.stack, pattern)))
         if srcs:
             rel = [os.path.relpath(s, c.stack) for s in srcs]
