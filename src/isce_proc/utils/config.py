@@ -183,7 +183,9 @@ AUTO_DICT = {
     'hpc.gpuUnits'            : 10,
     # gate after steps that failed before (a076 2026-09: 1, 7, 13, 15, 18-20, 24, 27) or that precede an
     # expensive step (5->6, 9->10, 16->17, 17->18); the others are short and never failed
-    'hpc.gateSteps'           : 'unpack_topo_reference,overlap_geo2rdr,pairs_misreg,fullBurst_geo2rdr,generate_burst_igram,'
+    # merge_reference_secondary_slc: d083 2026-10, 3 of 51 tasks timed out on one slow node, and generate_burst_igram follows
+    'hpc.gateSteps'           : 'unpack_topo_reference,overlap_geo2rdr,pairs_misreg,fullBurst_geo2rdr,merge_reference_secondary_slc,'
+                                'generate_burst_igram,'
                                 'filter_coherence,unwrap,subband_and_resamp,generateIgram_ion,mergeBurstsIon,unwrap_ion,'
                                 'invertIon,burstRampIon',
     # disk_usage after steps that write most of the data
