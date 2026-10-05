@@ -137,6 +137,9 @@ def cmdLineParse():
     parser.add_argument('--fuse-merge', dest='fuse_merge', action='store_true',
                         help='no job for generate_burst_igram: each merge_burst_igram task generates its pair, merges it and '
                              'deletes the burst interferograms (peak disk: running tasks only, not all pairs)')
+    parser.add_argument('--fuse-ion', dest='fuse_ion', action='store_true',
+                        help='no job for generateIgram_ion: each mergeBurstsIon task generates its pair (both sub-bands), '
+                             'merges it and deletes the sub-band burst interferograms')
     parser.add_argument('--fuse-mem', dest='fuse_mem', type=str, default='8G',
                         help='memory per CPU of the fused task (default: %(default)s; merge max RSS 3.3 GB on d083/a076)')
     parser.add_argument('--exclude', dest='exclude', type=str, default='',
@@ -235,13 +238,34 @@ if [ $rc -eq 0 ] && [ -n "$idir" ] && [ -d "$idir" ]; then
 fi"""
 
 
-def fuse_generate(text, merge_script, gen_script):
+FUSED_ION = """cmd=$(sed "${{ROWINDEX}}q;d" {merge})
+# fused (write_slurmJobs.py --fuse-ion): generate this pair's sub-band burst interferograms, merge, delete them
+pair=$(echo "$cmd" | grep -oE '[0-9]{{8}}-[0-9]{{8}}' | tail -1 | tr - _)
+gen=$(grep -m1 -E "config_generateIgram_ion_${{pair}}$" {gen})
+cfg="${{cmd##* }}"
+echo "Running: ${{gen}}" | tee -a $logfile
+srun $gen 2>&1
+rc=$?
+if [ $rc -eq 0 ]; then
+    echo "Running: ${{cmd}}" | tee -a $logfile
+    srun $cmd 2>&1
+    rc=$?
+fi
+if [ $rc -eq 0 ]; then
+    for idir in $(awk -F' : ' '/^dirname/{{print $2}}' "$cfg"); do      # ion/<pair>/{{lower,upper}}/interferograms
+        [ -d "$idir" ] && find "$idir" -name 'fine_*.int' -type f -delete
+    done
+    echo "deleted sub-band burst interferograms of $pair" | tee -a $logfile
+fi"""
+
+
+def fuse_generate(text, merge_script, gen_script, block=None):
     """Replace the single-command block of the merge job by generate + merge + delete for the row's pair."""
     import re
     pat = re.compile(r'^cmd=\$\(sed "\$\{ROWINDEX\}q;d" ' + re.escape(merge_script) + r'\)\n.*?^rc=\$\?$', re.M | re.S)
     if not pat.search(text):
         raise ValueError('job template changed: cannot fuse generate_burst_igram into merge_burst_igram')
-    return pat.sub(lambda m: FUSED.format(merge=merge_script, gen=gen_script), text, count=1)
+    return pat.sub(lambda m: (block or FUSED).format(merge=merge_script, gen=gen_script), text, count=1)
 
 
 def write_job_scripts(inps):
@@ -260,10 +284,16 @@ def write_job_scripts(inps):
 
     # Iterate over the run files, write an sbatch file for each one
     gen_script = next((x for x in step_scripts if x[7:] == 'generate_burst_igram'), None)
+    gen_ion_script = next((x for x in step_scripts if x[7:] == 'generateIgram_ion'), None)
     for index, step_script in enumerate(step_scripts):
         # a table of steps
         step_num        = step_script[:6]
         step_name       = step_script[7:]
+        if inps.fuse_ion and step_name == 'generateIgram_ion':
+            for old_job in glob.glob(f'{step_script}*.job'):
+                os.remove(old_job)
+            print(f' {step_script}: fused into mergeBurstsIon (no job)')
+            continue
         if inps.fuse_merge and step_name == 'generate_burst_igram':
             for old_job in glob.glob(f'{step_script}*.job'):
                 os.remove(old_job)                       # its rows run inside merge_burst_igram
@@ -274,14 +304,22 @@ def write_job_scripts(inps):
         if inps.fuse_merge and step_name == 'merge_burst_igram' and gen_script:
             gen_time = inps.rscDf[inps.rscDf['Step']=='generate_burst_igram']['Time'].item()
             time = add_times(time, gen_time)
+        if inps.fuse_ion and step_name == 'mergeBurstsIon' and gen_ion_script:
+            g = inps.rscDf[inps.rscDf['Step']=='generateIgram_ion']
+            time = add_times(time, g['Time'].item())
         nodes           = row['Nodes'].item()
         ntasks          = row['Ntasks'].item()
         ncpus_per_task  = row['Ncpus_per_task'].item()
         mem             = row['Mem_per_cpu'].item()
         if inps.fuse_merge and step_name == 'merge_burst_igram' and gen_script:
             mem = inps.fuse_mem
+        if inps.fuse_ion and step_name == 'mergeBurstsIon' and gen_ion_script:
+            mem = '4G'                                           # a076 max RSS: generateIgram_ion 1.6 GB, mergeBurstsIon 3.2 GB
+            ncpus_per_task = inps.rscDf[inps.rscDf['Step']=='generateIgram_ion']['Ncpus_per_task'].item()  # >4 CPUs for its I/O
         gres            = row['Gres'].item()
         max_task        = row['batch'].item()
+        if inps.fuse_ion and step_name == 'mergeBurstsIon' and gen_ion_script:
+            max_task = min(int(max_task), 100)                   # bounds the sub-band burst interferograms on disk
 
         # assign to a HPC partition w/ or w/o gpus
         # The default partition for The Resnick HPCC will change from “any” (CentOS 7) to “expansion” (RHEL 9) on Tuesday, March 26th.
@@ -340,6 +378,8 @@ def write_job_scripts(inps):
             text = inps.template.format(**context)
             if inps.fuse_merge and step_name == 'merge_burst_igram' and gen_script:
                 text = fuse_generate(text, step_script, gen_script)
+            if inps.fuse_ion and step_name == 'mergeBurstsIon' and gen_ion_script:
+                text = fuse_generate(text, step_script, gen_ion_script, FUSED_ION)
             with open(slurm_name, 'w') as outf:
                 outf.write(text)
 

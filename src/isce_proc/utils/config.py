@@ -98,6 +98,7 @@ hpc.gateSteps           = auto                       #steps (names, e.g. unwrap,
 hpc.diskSteps           = auto                       #steps (names or numbers) followed by a disk_usage job, or all
 hpc.campaignGap         = auto                       #days without any array task that separate processing campaigns in `report` (not wall time), auto for 14
 hpc.fuseMerge           = auto                       #[yes / no], generate+merge+delete each pair's burst interferograms in one task (low peak disk), auto for no
+hpc.fuseIon             = auto                       #[yes / no], generateIgram_ion inside mergeBurstsIon, deleting sub-band burst interferograms per pair, auto for no
 hpc.excludeNodes        = auto                       #nodes to avoid (#SBATCH --exclude), e.g. hpc-21-14,hpc-21-15, auto for none
 """
 
@@ -194,5 +195,6 @@ AUTO_DICT = {
                                 'unwrap_ion,computeIon,burstRampIon,mergeBurstRampIon',
     'hpc.excludeNodes'        : '',
     'hpc.fuseMerge'           : False,
+    'hpc.fuseIon'             : False,
     'hpc.campaignGap'         : 14,
 }

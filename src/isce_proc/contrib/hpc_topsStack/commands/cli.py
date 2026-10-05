@@ -73,6 +73,7 @@ def cmd_jobs(c, extra):
     argv += ['--gate', str(c.hpc.gateRetries), '--gate-steps', c.hpc.gateSteps] if c.hpc.gate else []
     argv += ['--disk-steps', c.hpc.diskSteps] + (['--exclude', str(c.hpc.excludeNodes)] if c.hpc.excludeNodes else [])
     argv += ['--fuse-merge'] if c.hpc.fuseMerge else []
+    argv += ['--fuse-ion'] if c.hpc.fuseIon else []
     argv += ['--gpu-type', c.hpc.gpuType] + ([] if c.isce.useGPU else ['--no-gpu'])
     with _in(c.stack):
         return _run_script_main('write_slurmJobs', argv + list(extra))
