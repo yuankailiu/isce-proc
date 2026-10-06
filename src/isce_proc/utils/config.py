@@ -188,7 +188,8 @@ AUTO_DICT = {
     'hpc.gateSteps'           : 'unpack_topo_reference,overlap_geo2rdr,pairs_misreg,fullBurst_geo2rdr,merge_reference_secondary_slc,'
                                 'generate_burst_igram,'
                                 'filter_coherence,unwrap,subband_and_resamp,generateIgram_ion,mergeBurstsIon,unwrap_ion,'
-                                'invertIon,burstRampIon',
+                                'filtIon,invertIon,burstRampIon',
+    # filtIon: d083 2026-10, the first 19 array tasks raced to create waterBody_ionlk.rdr, 18 failed in < 10 s
     # disk_usage after steps that write most of the data
     'hpc.diskSteps'           : 'unpack_topo_reference,fullBurst_resample,merge_reference_secondary_slc,generate_burst_igram,'
                                 'merge_burst_igram,filter_coherence,unwrap,subband_and_resamp,generateIgram_ion,mergeBurstsIon,'
