@@ -466,6 +466,8 @@ def prep_stack(iDict):
             iargs += ['--param_ion', iDict['paramIonFile'], '--num_connections_ion', iDict['numConnectionIon']]
             if iDict.get('numConnectionIonBridge'):
                 iargs += ['--num_connections_ion_bridge', str(iDict['numConnectionIonBridge'])]
+            if iDict.get('ionExtraPairs'):
+                iargs += ['--ion_extra_pairs', os.path.abspath(iDict['ionExtraPairs'])]
 
         if iDict['polarization']:
             iargs += ['--polarization', iDict['polarization']]
