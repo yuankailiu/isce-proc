@@ -177,13 +177,15 @@ def check_resources(rscDf):
     return True
 
 
-def row_parts(rows):
+def row_parts(rows, first_alone=False):
     """[(first row index, number of rows)] per job part: a new part where the program changes, and
-    at most SLURM_MAX_ARRAY_SIZE rows each."""
+    at most SLURM_MAX_ARRAY_SIZE rows each. first_alone: row 1 is a part of its own (it creates a
+    file that the other rows would otherwise race to create)."""
     progs = [r.split()[0] if r.split() else '' for r in rows]
     parts, start = [], 0
     for k in range(1, len(rows) + 1):
-        if k == len(rows) or progs[k] != progs[start] or k - start == SLURM_MAX_ARRAY_SIZE:
+        if (k == len(rows) or progs[k] != progs[start] or k - start == SLURM_MAX_ARRAY_SIZE
+                or (first_alone and k == 1)):
             parts.append((start, k - start))
             start = k
     return parts
@@ -330,8 +332,10 @@ def write_job_scripts(inps):
                      if gres > 0 else '')
 
         # split the rows into parts: at program changes (e.g. run_22: computeIon.py rows, then the
-        # mergeSwathIon.py rows that need them; parts run one after another) and at the array limit
-        parts = row_parts(open(step_script).read().splitlines())
+        # mergeSwathIon.py rows that need them; parts run one after another) and at the array limit.
+        # filtIon: row 1 alone first, it creates merged/geom_reference/waterBody_ionlk.rdr (rows started
+        # at the same time failed in 4-8 s reading a half-written file, d083 2026-10-04)
+        parts = row_parts(open(step_script).read().splitlines(), first_alone=step_name == 'filtIon')
         num_sbatch = len(parts)
         gate_list = None if inps.gate_steps.strip() == 'all' else set(inps.gate_steps.replace(',', ' ').split())
         gated = lambda num, last: inps.gate is not None and (last or gate_list is None or
