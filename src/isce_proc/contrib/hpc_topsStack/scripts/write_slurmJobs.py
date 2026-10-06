@@ -287,6 +287,20 @@ def write_job_scripts(inps):
     # Iterate over the run files, write an sbatch file for each one
     gen_script = next((x for x in step_scripts if x[7:] == 'generate_burst_igram'), None)
     gen_ion_script = next((x for x in step_scripts if x[7:] == 'generateIgram_ion'), None)
+    # fused steps: the generate step has no job and the fused (merge) job also generates, so a deletion
+    # attached to the generate step moves to the merge step, and one attached to the merge step (its kill-after
+    # step is the generate step) moves to the step after the merge
+    nums = [int(x[4:6]) for x in step_scripts]
+    for on, gen, mrg in ((inps.fuse_merge, 'generate_burst_igram', 'merge_burst_igram'),
+                         (inps.fuse_ion, 'generateIgram_ion', 'mergeBurstsIon')):
+        g = next((n for n, x in zip(nums, step_scripts) if x[7:] == gen), None)
+        m = next((n for n, x in zip(nums, step_scripts) if x[7:] == mrg), None)
+        if on and g and m and m != nums[-1]:
+            after = nums[nums.index(m) + 1]
+            moved = {after: deletions.pop(m, None), m: deletions.pop(g, None)}
+            for n, line in moved.items():
+                if line:
+                    deletions[n] = line + ('\n' + deletions[n] if n in deletions else '')
     for index, step_script in enumerate(step_scripts):
         # a table of steps
         step_num        = step_script[:6]
