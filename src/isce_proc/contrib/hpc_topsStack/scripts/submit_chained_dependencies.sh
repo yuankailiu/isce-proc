@@ -211,11 +211,17 @@ for ((i=0;i<${num_file};i++)); do
     prev=""
     if [ "$i" -gt 0 ]; then prev=$(basename "${sbatch_files[i-1]}" | cut -d. -f1); fi
     if [ "$i" -gt 0 ] && [ "$run_file" = "$prev" ]; then       # next part of the same step
-        if $gate; then d="--dependency=afterany:${last_job_id}"; else d="--dependency=afterok:${last_job_id}"; fi
+        if [[ "${sbatch_file_to_submit}" == *.gpu-*.job || "${sbatch_files[i-1]}" == *.gpu-*.job ]]; then
+            d="${step_dep}"                                    # GPU-type copies run alongside, same rows (claims)
+        elif $gate; then d="--dependency=afterany:${last_job_id}"; else d="--dependency=afterok:${last_job_id}"; fi
     elif [ -n "$dep" ]; then
         d="--dependency=${dep}"
     else
         d=""
+    fi
+    if [ "$run_file" != "$prev" ]; then                        # first job of this step
+        step_dep="$d"
+        [ -d "claims/${run_file:?}" ] && rm -rf -- "claims/${run_file:?}"   # row claims of an earlier submission
     fi
     ID=$(sbatch --parsable $d --export=ALL,logfile="${logfile}" "${sbatch_file_to_submit}")
     printf "$fmt_id" "${run_file}" "$ID" >> "${id_logfile}"

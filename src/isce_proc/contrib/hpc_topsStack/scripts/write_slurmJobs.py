@@ -7,7 +7,7 @@
 # (split into .pN parts above the array limit), a disk-usage job, and run_atTheEnd.sh.
 # Then submit with:  cd run_files; bash submit_chained_dependencies.sh
 
-import argparse, glob
+import argparse, glob, re
 import os
 import shutil
 import subprocess
@@ -128,8 +128,10 @@ def cmdLineParse():
     parser.add_argument('--disk-steps', dest='disk_steps', type=str, default='all', metavar='"1 10 12"',
                         help = 'steps followed by a disk_usage job, or all (default: %(default)s) -> disk_steps.txt')
     parser.add_argument('--gpu-type', dest='gpu_type', type=str, default='v100',
-                        help = 'GPU type for steps with Gres > 0 in resources.cfg (default: %(default)s; '
-                               'Slurm here requires --gres=gpu:<type>:<count>)')
+                        help = 'GPU type(s) for steps with Gres > 0 in resources.cfg, comma separated (default: %(default)s; '
+                               'Slurm here requires --gres=gpu:<type>:<count>, one type per job). With several types a '
+                               'single-part GPU step gets one job array per type over all rows; a task claims its row '
+                               '(mkdir claims/<step>/<row>) and exits at once if another type has it')
     parser.add_argument('--no-gpu', dest='no_gpu', action='store_true',
                         help = 'request no GPU for any step (isce.useGPU = no)')
     parser.add_argument('--template', dest='track_template', type=str, default=None,
@@ -261,6 +263,26 @@ if [ $rc -eq 0 ]; then
 fi"""
 
 
+CLAIM = """
+# Several GPU types run this step (one job array per type, all rows each; topsstack.py jobs, hpc.gpuType).
+# The first task to claim a row runs it; the others exit at once and remove their log, so the gate sees
+# one log per row. The gate clears the claims of the rows it reruns; submit clears them for the step.
+CLAIM=claims/{step}/${{ROWINDEX}}
+mkdir -p claims/{step}
+if ! mkdir "$CLAIM" 2>/dev/null; then
+    rm -f "slurm-{step}-${{SLURM_ARRAY_JOB_ID}}_${{SLURM_ARRAY_TASK_ID}}.out"
+    exit 0
+fi
+echo "$SLURM_JOB_ID $SLURM_ARRAY_TASK_ID $(hostname) $(date +%FT%T)" > "$CLAIM/by"
+"""
+
+
+def add_claim(text, step_script):
+    """Insert the row claim right after ROWINDEX is set."""
+    m = re.search(r'^ROWINDEX=.*$', text, flags=re.M)
+    return text[:m.end()] + '\n' + CLAIM.format(step=step_script) + text[m.end():]
+
+
 def fuse_generate(text, merge_script, gen_script, block=None):
     """Replace the single-command block of the merge job by generate + merge + delete for the row's pair."""
     import re
@@ -342,7 +364,8 @@ def write_job_scripts(inps):
         gres = 0 if inps.no_gpu else int(gres)
         if gres > 0: partition = 'gpu'
         else: partition = 'expansion'
-        gres_line = (f'#SBATCH --gres=gpu:{inps.gpu_type}:{gres}                  # GPUs (geo2rdr steps)\n'
+        gpu_types = [t.strip() for t in inps.gpu_type.split(',') if t.strip()]
+        gres_line = (f'#SBATCH --gres=gpu:{gpu_types[0]}:{gres}                  # GPUs (geo2rdr steps)\n'
                      if gres > 0 else '')
 
         # split the rows into parts: at program changes (e.g. run_22: computeIon.py rows, then the
@@ -398,6 +421,17 @@ def write_job_scripts(inps):
                 text = fuse_generate(text, step_script, gen_script)
             if inps.fuse_ion and step_name == 'mergeBurstsIon' and gen_ion_script:
                 text = fuse_generate(text, step_script, gen_ion_script, FUSED_ION)
+            for old in glob.glob(f'{step_script}.gpu-*.job'):
+                os.remove(old)                           # types may have changed since the last `jobs`
+            if gres > 0 and len(gpu_types) > 1 and num_sbatch == 1:
+                text = add_claim(text, step_script)
+                for t in gpu_types[1:]:
+                    other = re.sub(r'^#SBATCH --gres=gpu:[^:\s]+:', f'#SBATCH --gres=gpu:{t}:', text, flags=re.M)
+                    other = re.sub(r'^#SBATCH --mail-type=\S+', '#SBATCH --mail-type=NONE', other, flags=re.M)
+                    other = '\n'.join(l for l in other.split('\n') if 'clean_topsStack.py' not in l)
+                    with open(f'{step_script}.gpu-{t}.job', 'w') as outf:
+                        outf.write(other)
+                print(f' {step_script}.gpu-{{{",".join(gpu_types[1:])}}}.job (same rows; first claim wins)')
             with open(slurm_name, 'w') as outf:
                 outf.write(text)
 
