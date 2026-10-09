@@ -156,6 +156,10 @@ topsstack.py submit ChileSenAT120.txt -s 24
 `ionqc` excludes a pair when its raw ionosphere has blocks (unwrapping errors) or it fails loop
 closure, and the correction does not help its interferogram; the network stays connected. Lists:
 `logs/ionqc_exclude.txt`, `logs/ionqc_check.txt` (look at these). Details: `commands/ionqc.py`.
+Optional `--network`: a second opinion from the residual of each pair against the whole network
+(iteratively reweighted least squares). Pairs it down-weights (weight < 0.5 and residual > 0.3 x their
+own signal) are added to "look at" only, never excluded; CSV columns `irls_*`. Not the default: on the
+Chile tracks it improved the held-out prediction by a median 2 % (asc) / 0 % (dsc) over the curated lists.
 
 ### 8. Free disk space (optional, any time)
 

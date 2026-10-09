@@ -186,10 +186,13 @@ def cmd_ionqc(c, extra):
     ap.add_argument('--raw-floor', type=float, default=50.0, help='minimum raw-spread threshold [rad] (default: %(default)s)')
     ap.add_argument('--raw-nmad', type=float, default=10.0, help='raw threshold = median + N * MAD (default: %(default)s)')
     ap.add_argument('--ratio', type=float, default=1.5, help='variance ratio at 100 km to list for checking (default: %(default)s)')
+    ap.add_argument('--network', action='store_true', help='also the network-residual test (IRLS weights, as qc/ion_network.py): '
+                    'pairs in use with weight < 0.5 are listed to look at, never excluded')
     a = ap.parse_args(extra)
     return ionqc.ionqc(c, raw=a.raw or a.raw_only, closure_test=not a.raw_only, unw=a.unw and not a.raw_only,
                        apply=a.apply, nproc=a.nproc, floor=a.floor, nmad=a.nmad, ratio_max=a.ratio,
-                       raw_floor=a.raw_floor, raw_nmad=a.raw_nmad, sample=a.sample)
+                       raw_floor=a.raw_floor, raw_nmad=a.raw_nmad, sample=a.sample,
+                       network_test=a.network)
 
 
 def cmd_plot(c, extra):

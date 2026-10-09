@@ -12,6 +12,10 @@ closure (after step 23, default) for every triangle of pairs (a,b), (b,c), (a,c)
         on filt.ion. A pair's score is the median RMS of e over its triangles, attributed greedily
         (worst pair first; its triangles are then ignored when scoring the others). A flagged pair
         with no triangle free of other flagged pairs is 'ambiguous' ('closure x?').
+--network (optional, report only) residual of each pair against the network consensus, iteratively
+        reweighted (IRLS as chile/src/chile/qc/ion_network.py) over the pairs still in use; a pair with
+        weight < 0.5 and residual > 0.3 x its own signal is listed to look at, never excluded. It flags
+        different pairs than closure (a018_south: 2 of 15 in common), so it is a second opinion.
 --unw   (after step 23) semivariogram gamma(r) = 0.5 E[(phi(x+r) - phi(x))^2] of the interferogram
         (merged/interferograms/<pair>/filt_fine.unw, pixels with filt_fine.cor > 0.5 in the mask)
         at r = 10, 25, 50, 100, 200 km (about log-spaced), ratio (unw - ion) / unw; the decision uses
@@ -289,6 +293,65 @@ def seam_test(c, pairs, sets, dist, nproc, step=4, span_max=2, dt_max=60, cor_mi
     return out, thin
 
 
+# ---------------------------------------------------------------- network residual (IRLS)
+def network(c, pairs, exc, nproc, n_pixel=2500, k=2.0, nit=5):
+    """Residual of each pair against the network consensus, iteratively reweighted (--network).
+
+    filt.ion band 2 of every pair at ~n_pixel land samples (waterBody_ionlk 0 = land, if present), pixels
+    finite in all pairs in use, per-pair mean removed. Least squares over the pairs in use (not in `exc`),
+    then IRLS: r_i = RMS(p_i - (c[d2] - c[d1])), w_i = min(1, k median(r) / r_i), `nit` times (as
+    chile/src/chile/qc/ion_network.py). Excluded pairs are scored against the final network, not fitted.
+    Returns {pair: (weight, or NaN if excluded; r_i / median(r); r_i / signal_i)}, signal_i = RMS of the
+    pair itself. The weight alone favours pairs with a strong ionosphere (a149: flagged pairs had 7x the
+    median signal), so the caller also requires r_i / signal_i > 0.3 (the irlsE curation criterion).
+    Report only: never excludes.
+    """
+    f0 = os.path.join(c.stack, 'ion', pairs[0], 'ion_cal', 'filt.ion')
+    w, l = _size(f0 + '.xml')
+    step = max(1, int(np.sqrt(l * w / n_pixel)))
+    with ThreadPoolExecutor(nproc) as ex:
+        P = np.array(list(ex.map(lambda p: _band(os.path.join(c.stack, 'ion', p, 'ion_cal', 'filt.ion'), 2, 2, step).ravel(), pairs)))
+    for g in ('merged/geom_reference', 'geom_reference'):
+        f = os.path.join(c.stack, g, 'waterBody_ionlk.rdr')
+        if os.path.isfile(f):
+            land = _band(f, 1, 1, step, np.int8).ravel() == 0
+            if land.size == P.shape[1]:
+                P[:, ~land] = np.nan
+            break
+    live = np.isfinite(P).any(axis=1)
+    use = np.array([p not in exc for p in pairs]) & live
+    good = np.isfinite(P[use]).all(axis=0)
+    if good.sum() < 200:
+        print(f'network test skipped: only {good.sum()} pixels finite in every pair in use')
+        return {}
+    P = P[:, good]
+    P[live] -= np.nanmean(P[live], axis=1, keepdims=True)
+    dates = sorted({d for p, u in zip(pairs, use) if u for d in p.split('_')})
+    ix = {d: i for i, d in enumerate(dates)}
+    A = np.zeros((len(pairs), len(dates)))
+    for i, p in enumerate(pairs):
+        a, b = p.split('_')
+        if a in ix and b in ix:
+            A[i, ix[a]], A[i, ix[b]] = -1, 1
+    Au, Pu, wt = A[use], P[use], np.ones(use.sum())
+    for _ in range(nit):
+        s = np.sqrt(wt)[:, None]
+        cc = np.linalg.lstsq(Au * s, Pu * s, rcond=None)[0]
+        r = np.sqrt(((Pu - Au @ cc) ** 2).mean(axis=1))
+        wt = np.minimum(1.0, k * np.median(r) / np.maximum(r, 1e-12))
+    med = np.median(r)
+    with np.errstate(invalid='ignore'):
+        sig = np.sqrt(np.nanmean(P ** 2, axis=1))          # NaN for all-empty pairs
+    out = {p: (float(x), float(y / med), float(y / g)) for p, x, y, g in zip(np.array(pairs)[use], wt, r, sig[use])}
+    for i in np.where(~use & live)[0]:                     # excluded: predicted by the network, not fitted
+        if A[i].any():
+            e = P[i] - A[i] @ cc
+            e = e[np.isfinite(e)]
+            ri = float(np.sqrt(np.mean((e - e.mean()) ** 2))) if e.size else np.nan
+            out[pairs[i]] = (np.nan, ri / med, ri / sig[i])
+    return out
+
+
 # ---------------------------------------------------------------- run files
 def _exc_now(c):
     run = sorted(glob.glob(os.path.join(c.stack, 'run_files', 'run_[0-9][0-9]_invertIon')))
@@ -320,7 +383,7 @@ def apply_exc(c, exc):
 # ---------------------------------------------------------------- driver
 def ionqc(c, raw=False, closure_test=True, unw=False, apply=False, nproc=8, step=2,
           floor=3.0, nmad=6.0, ratio_max=1.5, ratio_excl=5.0, raw_floor=50.0, raw_nmad=10.0,
-          dists=(10, 25, 50, 100, 200), dist_test=100, sample=0):
+          dists=(10, 25, 50, 100, 200), dist_test=100, sample=0, network_test=False, w_check=0.5, rel_check=0.3):
     name = 'filt.ion' if closure_test or unw else 'raw_no_projection.ion'
     files = sorted(glob.glob(os.path.join(c.stack, 'ion', '*_*', 'ion_cal', name)))
     pairs = sorted(f.split(os.sep)[-3] for f in files if PAIR.match(f.split(os.sep)[-3]))
@@ -424,6 +487,18 @@ def ionqc(c, raw=False, closure_test=True, unw=False, apply=False, nproc=8, step
     new = sorted(set(exc) - set(old))
     clean_old = sorted(q for q in old if q in pairs and q not in bad and q not in weak)
 
+    # --network (report only): pairs the network consensus down-weights, among those still in use
+    net, net_check = {}, []
+    if network_test:
+        print(f'network residual (IRLS) of {len(used)} pairs in use ...', flush=True)
+        net = network(c, pairs, set(exc), nproc)
+        for q in used:
+            wq, _, rel = net.get(q, (np.nan, np.nan, np.nan))
+            if np.isfinite(wq) and wq < w_check and rel > rel_check and q not in check and q not in keep_bridge:
+                check.append(q)
+                net_check.append(q)
+        stats.append(f'network (IRLS, k 2, 5 iterations; report only): {len(net_check)} more pair(s) with weight < {w_check} and residual > {rel_check} x own signal')
+
     def status(q):
         if q in new: return 'exclude (new)'
         if q in old: return 'excluded (yours, looks clean)' if q in clean_old else 'excluded (yours)'
@@ -435,8 +510,14 @@ def ionqc(c, raw=False, closure_test=True, unw=False, apply=False, nproc=8, step
     stamp = f'{datetime.now():%Y-%m-%d}'
     os.makedirs(os.path.join(c.stack, 'logs'), exist_ok=True)
     head = (['pair', 'dt_days', 'raw_spread_rad', 'n_triangles', 'closure_rms_rad'] + [f'var_ratio_{d}km' for d in dists]
-            + ['status', 'closure_unvalidated', 'reason'])
-    out = [r[:-1] + [status(r[0]), int(r[0] in weak), r[-1].replace(' -> exclude', '').replace(' -> check', '').strip(' ;')] for r in rows]
+            + ['irls_weight', 'irls_resid_over_median', 'irls_resid_over_signal', 'status', 'closure_unvalidated', 'reason'])
+
+    def reason(r):
+        why = r[-1].replace(' -> exclude', '').replace(' -> check', '').strip(' ;')
+        if r[0] in net_check:
+            why = '; '.join(x for x in [why, f'network w {net[r[0]][0]:.2f}, resid {net[r[0]][2]:.2f} x signal'] if x)
+        return why
+    out = [r[:-1] + list(net.get(r[0], (np.nan, np.nan, np.nan))) + [status(r[0]), int(r[0] in weak), reason(r)] for r in rows]
     fcsv = os.path.join(c.stack, 'logs', f'ionqc_{stamp}.csv')
     with open(fcsv, 'w', newline='') as f:
         csv.writer(f).writerows([head] + out)
@@ -455,6 +536,8 @@ def ionqc(c, raw=False, closure_test=True, unw=False, apply=False, nproc=8, step
         info.append(f'raw median {rmed:.0f} rad (flag > {rthr:.0f})')
     if a100.size:
         info.append(f'correction at {dist_test} km: median ratio {np.median(a100):.2f}, helps {100 * (a100 < 1).mean():.0f}%')
+    if network_test:
+        info.append(f'network: {len(net_check)} more to look at (w < {w_check}, resid > {rel_check} x signal)')
     byp = {r[0]: r for r in out}
 
     def show(title, lst):
