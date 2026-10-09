@@ -16,7 +16,7 @@ Run from the stack directory or its run_files/:
                                            # step wait for them (job_id_logfile_*.txt)
   check_topsStack.py 15 --gate 2           # (gate.job) rerun up to 2x via follow-up gates, exit 1 if still bad
 """
-import argparse, shutil, glob, os, re, subprocess, sys
+import argparse, glob, os, re, subprocess, sys
 from concurrent.futures import ThreadPoolExecutor
 
 MAX_ARRAY = 1000   # rows per .pN job file, as in write_slurmJobs.py
@@ -200,9 +200,6 @@ def submit_reruns(step, bad, submit):
             if off < r <= off + n:
                 parts.setdefault(sfx, []).append(r - off)
                 break
-    if submit and os.path.isdir(f'claims/{step}'):        # GPU-type copies (hpc.gpuType): let the reruns claim again
-        for r in bad:
-            shutil.rmtree(f'claims/{step}/{r}', ignore_errors=True)
     new_ids = []
     for sfx, tasks in sorted(parts.items()):
         job = f'{step}.{sfx}.job' if sfx else f'{step}.job'
