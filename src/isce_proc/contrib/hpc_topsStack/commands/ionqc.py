@@ -16,13 +16,19 @@ closure (after step 23, default) for every triangle of pairs (a,b), (b,c), (a,c)
         reweighted (IRLS as chile/src/chile/qc/ion_network.py) over the pairs still in use; a pair with
         weight < 0.5 and residual > 0.3 x its own signal is listed to look at, never excluded. It flags
         different pairs than closure (a018_south: 2 of 15 in common), so it is a second opinion.
+--cover (after step 23) regional coverage: the fraction of each ~block x block pixel area (default 100 px, about
+        the filtIon window) that filtIon trusts, per pair. Where the stack usually has data (median coverage >=
+        0.7) but a pair has < 0.3, filt.ion there is almost all fill; if such a pair is the only link across a
+        gap, the fill becomes a velocity (d083 north corner: 39 bridge pairs 2020-21 -> 2025-26 gave +3 mm/yr).
+        Scene-wide coverage does not show it (those pairs: 0.60 vs 0.80). Flagged pairs are excluded (network
+        kept connected).
 --unw   (after step 23) semivariogram gamma(r) = 0.5 E[(phi(x+r) - phi(x))^2] of the interferogram
         (merged/interferograms/<pair>/filt_fine.unw, pixels with filt_fine.cor > 0.5 in the mask)
         at r = 10, 25, 50, 100, 200 km (about log-spaced), ratio (unw - ion) / unw; the decision uses
         100 km, where the filtered ionosphere (filtIon windows ~70-150 km) has its power.
         > 1: the correction adds variance.
 
-Exclude a pair when closure or --raw flags it and the correction does not help (ratio >= 1 or not
+Exclude a pair when --cover flags it, or closure or --raw flags it and the correction does not help (ratio >= 1 or not
 tested), or closure is ambiguous and --raw or --unw (ratio > --ratio) also flags it, or the
 correction alone makes the interferogram much worse (ratio > 5); and only if the network stays connected without it (union-find over the dates, worst pair
 first). Other flags are listed to check by eye. All pairs and statistics go to
@@ -293,6 +299,50 @@ def seam_test(c, pairs, sets, dist, nproc, step=4, span_max=2, dt_max=60, cor_mi
     return out, thin
 
 
+# ---------------------------------------------------------------- regional coverage
+def region_cover(c, pairs, nproc, block=100, step=2, good=0.7):
+    """Per pair, the lowest coverage over the blocks the stack usually covers (median >= good).
+
+    Coverage = fraction of the block that filtIon trusts (_mask: filt_msk_init.rdr, else coh > 0.75 & land).
+    Returns ({pair: (min coverage, block row, block col)}, number of well-covered blocks, block size in pixels,
+    per-pair block coverage array (n_pair, ny, nx)).
+    """
+    b = max(1, block // step)
+
+    def one(p):
+        m = _mask(c, p, step).astype(np.float32)
+        ny, nx = m.shape[0] // b, m.shape[1] // b
+        return m[:ny * b, :nx * b].reshape(ny, b, nx, b).mean(axis=(1, 3))
+    with ThreadPoolExecutor(nproc) as ex:
+        cov = np.array(list(ex.map(one, pairs)))
+    med = np.median(cov, axis=0)
+    gb = med >= good
+    if not gb.any():
+        return {}, 0, b * step, cov
+    out = {}
+    for p, cv in zip(pairs, cov):
+        x = np.where(gb, cv, np.inf)
+        i, j = np.unravel_index(np.argmin(x), x.shape)
+        out[p] = (float(x[i, j]), int(i), int(j))
+    return out, int(gb.sum()), b * step, cov
+
+
+def _linked(a, b, pairs):
+    """True if dates a and b are connected by `pairs` (union-find)."""
+    par = {}
+
+    def root(x):
+        par.setdefault(x, x)
+        while par[x] != x:
+            par[x] = par[par[x]]
+            x = par[x]
+        return x
+    for q in pairs:
+        u, v = q.split('_')
+        par[root(u)] = root(v)
+    return a in par and b in par and root(a) == root(b)
+
+
 # ---------------------------------------------------------------- network residual (IRLS)
 def network(c, pairs, exc, nproc, n_pixel=2500, k=2.0, nit=5):
     """Residual of each pair against the network consensus, iteratively reweighted (--network).
@@ -383,7 +433,8 @@ def apply_exc(c, exc):
 # ---------------------------------------------------------------- driver
 def ionqc(c, raw=False, closure_test=True, unw=False, apply=False, nproc=8, step=2,
           floor=3.0, nmad=6.0, ratio_max=1.5, ratio_excl=5.0, raw_floor=50.0, raw_nmad=10.0,
-          dists=(10, 25, 50, 100, 200), dist_test=100, sample=0, network_test=False, w_check=0.5, rel_check=0.3):
+          dists=(10, 25, 50, 100, 200), dist_test=100, sample=0, network_test=False, w_check=0.5, rel_check=0.3,
+          cover_test=False, cover_block=100, cover_low=0.3, cover_good=0.7):
     name = 'filt.ion' if closure_test or unw else 'raw_no_projection.ion'
     files = sorted(glob.glob(os.path.join(c.stack, 'ion', '*_*', 'ion_cal', name)))
     pairs = sorted(f.split(os.sep)[-3] for f in files if PAIR.match(f.split(os.sep)[-3]))
@@ -424,6 +475,25 @@ def ionqc(c, raw=False, closure_test=True, unw=False, apply=False, nproc=8, step
                      f'ratio (unw - ion)/unw at {dists} km, decision at {dist_test} km (list > {ratio_max}); '
                      f'sign check: unw - ion better than unw + ion in {sign[0]}/{sign[1]}')
 
+    cov, cov_bad, cov_alt = {}, [], []
+    if cover_test:
+        print(f'regional coverage of {len(pairs)} pairs ({cover_block} px blocks) ...', flush=True)
+        cov, ngood, bpx, carr = region_cover(c, pairs, nproc, cover_block, step, cover_good)
+        low = [p for p, v in cov.items() if v[0] < cover_low]
+        # exclude only where real data can replace the fill: the pair's dates stay linked, in its worst block,
+        # by pairs with coverage >= cover_low there (not already excluded); otherwise only list it
+        ipair = {p: k for k, p in enumerate(pairs)}
+        cov_alt = []
+        for p in low:
+            _, i, j = cov[p]
+            ok = [q for q in pairs if q != p and q not in old and carr[ipair[q], i, j] >= cover_low]
+            if _linked(*p.split('_'), ok):
+                cov_bad.append(p)
+            else:
+                cov_alt.append(p)
+        stats.append(f'regional coverage: {ngood} blocks of {bpx} px with stack median >= {cover_good}; '
+                     f'{len(low)} pairs below {cover_low} in one of them; {len(cov_bad)} replaceable by covered pairs')
+
     rows, bad, check = [], [], []
     for p in pairs:
         s_, n = clo[p]
@@ -435,7 +505,11 @@ def ionqc(c, raw=False, closure_test=True, unw=False, apply=False, nproc=8, step
                + ([f'closure {s_:.1f}?'] if p in clo_amb else []))
         if worse:
             why.append(f'var ratio {r50:.2f}')
-        if (((p in raw_bad or p in clo_bad) and not helps) or (p in clo_amb and (p in raw_bad or worse))
+        if p in cov_bad:
+            why.append(f'region cover {cov[p][0]:.2f} (block {cov[p][1]},{cov[p][2]})')
+        elif cover_test and p in cov_alt:
+            why.append(f'region cover {cov[p][0]:.2f} (block {cov[p][1]},{cov[p][2]}), no covered alternative')
+        if p in cov_bad or (((p in raw_bad or p in clo_bad) and not helps) or (p in clo_amb and (p in raw_bad or worse))
                 or (np.isfinite(r50) and r50 > ratio_excl)):
             bad.append(p)
             why.append('-> exclude')
@@ -448,7 +522,7 @@ def ionqc(c, raw=False, closure_test=True, unw=False, apply=False, nproc=8, step
 
     # keep the network connected: remove the worst first; keep a pair whose removal splits it
     def worst(p):
-        return -(np.nan_to_num(clo[p][0]) + np.nan_to_num(rs.get(p, 0)))
+        return -(np.nan_to_num(clo[p][0]) + np.nan_to_num(rs.get(p, 0)) + (1 - cov[p][0] if p in cov_bad else 0))
     exc, keep_bridge = [q for q in old if q in pairs], []
     for p in sorted(bad, key=worst):
         if p in exc:
@@ -510,14 +584,14 @@ def ionqc(c, raw=False, closure_test=True, unw=False, apply=False, nproc=8, step
     stamp = f'{datetime.now():%Y-%m-%d}'
     os.makedirs(os.path.join(c.stack, 'logs'), exist_ok=True)
     head = (['pair', 'dt_days', 'raw_spread_rad', 'n_triangles', 'closure_rms_rad'] + [f'var_ratio_{d}km' for d in dists]
-            + ['irls_weight', 'irls_resid_over_median', 'irls_resid_over_signal', 'status', 'closure_unvalidated', 'reason'])
+            + ['irls_weight', 'irls_resid_over_median', 'irls_resid_over_signal', 'min_block_cover', 'status', 'closure_unvalidated', 'reason'])
 
     def reason(r):
         why = r[-1].replace(' -> exclude', '').replace(' -> check', '').strip(' ;')
         if r[0] in net_check:
             why = '; '.join(x for x in [why, f'network w {net[r[0]][0]:.2f}, resid {net[r[0]][2]:.2f} x signal'] if x)
         return why
-    out = [r[:-1] + list(net.get(r[0], (np.nan, np.nan, np.nan))) + [status(r[0]), int(r[0] in weak), reason(r)] for r in rows]
+    out = [r[:-1] + list(net.get(r[0], (np.nan, np.nan, np.nan))) + [cov.get(r[0], (np.nan,))[0], status(r[0]), int(r[0] in weak), reason(r)] for r in rows]
     fcsv = os.path.join(c.stack, 'logs', f'ionqc_{stamp}.csv')
     with open(fcsv, 'w', newline='') as f:
         csv.writer(f).writerows([head] + out)
@@ -536,6 +610,9 @@ def ionqc(c, raw=False, closure_test=True, unw=False, apply=False, nproc=8, step
         info.append(f'raw median {rmed:.0f} rad (flag > {rthr:.0f})')
     if a100.size:
         info.append(f'correction at {dist_test} km: median ratio {np.median(a100):.2f}, helps {100 * (a100 < 1).mean():.0f}%')
+    if cover_test:
+        info.append(f'regional coverage: {len(cov_bad)} replaceable pair(s) < {cover_low} where the stack has >= {cover_good}, '
+                    f'{len(cov_alt)} more without a covered alternative (listed)')
     if network_test:
         info.append(f'network: {len(net_check)} more to look at (w < {w_check}, resid > {rel_check} x signal)')
     byp = {r[0]: r for r in out}
