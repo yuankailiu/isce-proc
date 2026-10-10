@@ -183,9 +183,9 @@ def main():
                     help='with --delete: skip checking that the kill-after step produced all its outputs')
     ap.add_argument('-n', '--nproc', type=int, default=32, help='parallel threads (default: %(default)s)')
     ap.add_argument('--keep-last', type=int, default=0, metavar='N',
-                    help='keep the files of the N latest dates (coreg_secondarys/ dates; a path containing one of '
-                         'them, e.g. coreg_secondarys/<date>/, merged/SLC/<date>/, an SLC zip of that date), e.g. '
-                         'for the pairs of a later update that connect to them')
+                    help='keep the files of the N latest dates of coreg_secondarys/ and of every later date (a path '
+                         'containing such a date, e.g. coreg_secondarys/<date>/, merged/SLC/<date>/, an SLC zip of '
+                         'that date), e.g. for the pairs of a later update that connect to them')
     args = ap.parse_args()
 
     root = os.getcwd()
@@ -214,8 +214,10 @@ def main():
         dates = sorted(e.name for e in os.scandir(os.path.join(root, 'coreg_secondarys'))
                        if e.is_dir() and re.fullmatch(r'\d{8}', e.name)) if os.path.isdir(os.path.join(root, 'coreg_secondarys')) else []
         keep = set(dates[-args.keep_last:])
-        print(f'keeping the {len(keep)} latest dates: {min(keep) if keep else "-"} .. {max(keep) if keep else "-"}')
-    kept = lambda f: bool(keep) and any(d in keep for d in re.findall(r'(?<!\d)(20\d{6})(?!\d)', os.path.relpath(f, root)))
+        print(f'keeping the {len(keep)} latest dates: {min(keep) if keep else "-"} .. {max(keep) if keep else "-"}, '
+              'and any later date (e.g. SLC zips of an update not processed yet)')
+    cutoff = min(keep) if keep else None
+    kept = lambda f: bool(keep) and any(d >= cutoff for d in re.findall(r'(?<!\d)(20\d{6})(?!\d)', os.path.relpath(f, root)))
     logs = sorted(glob.glob(os.path.join(root, 'run_files', 'clean_topsStack_*.log')))
     total = 0
     print(f'\n{"DELETING" if args.delete else "dry run"}; file lists -> {log}')
