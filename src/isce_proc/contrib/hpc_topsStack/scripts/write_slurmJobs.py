@@ -68,6 +68,26 @@ printf "%-35s%-12s%-12s%-12s%-12s\\n" "${{STEP#run_??_}}" "${{STEP:0:6}}" "$SLUR
 """
 
 
+CLEAN_JOB = """#!/bin/bash
+# Delete intermediate files whose last reader has finished. Submitted by submit_chained_dependencies.sh
+# beside a step, with that step's dependency, as
+#   --export=ALL,STEP=<run_file>,TARGETS="<clean_topsStack targets>"   (clean_steps.txt)
+# No job waits for it. clean_topsStack.py re-checks the kill-after step's outputs before deleting.
+#SBATCH -A {groupname}
+#SBATCH -J clean_{track}
+#SBATCH --time=12:00:00
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=8G
+#SBATCH --partition=expansion
+{exclude_line}#SBATCH --output=slurm-clean-%j.out
+
+echo "$(date) clean beside $STEP: $TARGETS"
+{python} clean_topsStack.py $TARGETS --delete -n 16
+echo "$(date) done (exit $?)"
+"""
+
+
 GATE_JOB = """#!/bin/bash
 # Gate between two steps, submitted by submit_chained_dependencies.sh with
 #   --dependency=afterany:<all parts of the step> --export=ALL,STEP=<run_file>[,GATE_FINAL=1]
@@ -192,11 +212,12 @@ def row_parts(rows, first_alone=False):
 
 
 def deletion_lines(clean):
-    """Map each clean_topsStack target to the step after its kill-after step.
+    """{step number: 'target ...'}: each clean_topsStack target goes to the step after its kill-after step.
 
-    The deletion runs in array task 1 of that next step, i.e. only after every task
-    of the kill-after step has exited OK (afterok chain). Slurm COMPLETED does not
-    prove the outputs exist, so the lines are commented out unless --clean.
+    With --clean, submit_chained_dependencies.sh sends clean.job alongside that step, with the step's own
+    dependency (after the kill-after step and its gate), so the deletion takes none of a task's time limit
+    (2026-10-12: inside array task 1 it used up the 1-h limit of fullBurst_geo2rdr, 3 times). clean_topsStack.py
+    checks again that the kill-after step has all its outputs before it deletes anything.
     """
     steps, zip_vrt, virtual, ion = clean_topsStack.stack_info(str(Path.cwd().parent))
     nums = sorted(steps.values())
@@ -205,9 +226,7 @@ def deletion_lines(clean):
         if kill in steps and steps[kill] < nums[-1]:
             nxt = next(n for n in nums if n > steps[kill])
             attach.setdefault(nxt, []).append(target)
-    prefix = '' if clean else '# '
-    return {n: f'{prefix}if [[ $SLURM_ARRAY_TASK_ID -eq 1 ]]; then srun python clean_topsStack.py {" ".join(t)} --delete; fi'
-            for n, t in attach.items()}
+    return {n: ' '.join(t) for n, t in attach.items()}
 
 
 def add_times(a, b):
@@ -300,7 +319,7 @@ def write_job_scripts(inps):
             moved = {after: deletions.pop(m, None), m: deletions.pop(g, None)}
             for n, line in moved.items():
                 if line:
-                    deletions[n] = line + ('\n' + deletions[n] if n in deletions else '')
+                    deletions[n] = line + (' ' + deletions[n] if n in deletions else '')
     for index, step_script in enumerate(step_scripts):
         # a table of steps
         step_num        = step_script[:6]
@@ -388,7 +407,7 @@ def write_job_scripts(inps):
                 # topo runs a python pool of Ncpus_per_task/omp_topo processes, each with omp_topo threads
                 "omp_threads"       :   inps.omp_topo if step_name == 'unpack_topo_reference' else '$SLURM_CPUS_PER_TASK',
                 # delete only from the first part of a multi-part step
-                "deletion"          :   deletions.get(int(step_num[4:]), '') if i == 0 else '',
+                "deletion"          :   '# (deletions: clean.job, see clean_steps.txt)' if i == 0 and int(step_num[4:]) in deletions else '',
             }
 
             # Put variables from context dic into the slurm script template
@@ -423,8 +442,23 @@ def write_job_scripts(inps):
     with open('disk_steps.txt', 'w') as outf:
         outf.write(inps.disk_steps.strip() + '\n')
     print(f' disk_usage.job (after steps: {inps.disk_steps})')
-    for n, line in sorted(deletions.items()):
-        print(f'   deletion in run_{n:02d}: {line}')
+    num2step = {int(x[4:6]): x for x in step_scripts}
+    if inps.clean:
+        with open('clean_steps.txt', 'w') as outf:
+            outf.write('# step  clean_topsStack.py targets, deleted by clean.job submitted alongside the step\n')
+            for n, t in sorted(deletions.items()):
+                outf.write(f'{num2step.get(n, f"run_{n:02d}")} {t}\n')
+        with open('clean.job', 'w') as outf:
+            outf.write(CLEAN_JOB.format(groupname=inps.account, track=inps.track_no, python=sys.executable,
+                                        exclude_line=f'#SBATCH --exclude={inps.exclude}\n' if inps.exclude else ''))
+        print(' clean.job + clean_steps.txt (deletions run beside the steps below):')
+    else:
+        for f in ('clean_steps.txt', 'clean.job'):
+            if os.path.exists(f):
+                os.remove(f)
+        print(' deletions off (no --clean / hpc.clean); they would be:')
+    for n, t in sorted(deletions.items()):
+        print(f'   with {num2step.get(n, f"run_{n:02d}")}: {t}')
     print(f'create job scripts for {inps.track_no}.')
 
 

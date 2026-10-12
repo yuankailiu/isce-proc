@@ -50,11 +50,13 @@ get_step_num() {
 step_sta=0; step_end=0
 declare -a job_list_args=() # Array to store job numbers passed with -l
 
-while getopts s:e:l flag
+dep0=""   # -d: dependency of the first job submitted (e.g. afterok:<rerun job>)
+while getopts s:e:d:l flag
 do
     case "${flag}" in
         s) step_sta=${OPTARG};;  # start step (a serial steps)
         e) step_end=${OPTARG};;  #   end step (a serial steps)
+        d) dep0=${OPTARG};;      # dependency of the first job, e.g. afterok:123
         l) # Capture subsequent arguments for -l
            # Shift OPTIND to consume the -l flag, then capture remaining positional args
            shift $((OPTIND-1))
@@ -202,7 +204,7 @@ fmt_id="%-50s %s\\n"   # at least one space: long step names ran into the ID
 printf "$fmt_id" "Stage" "Job ID" >> "${id_logfile}"
 gate=false; [ -f gate.job ] && gate=true && echo "gate.job present: checking outputs between steps"
 
-dep=""            # dependency of the first part of the next step
+dep="${dep0}"     # dependency of the first part of the next step (-d for the first one)
 step_parts=""     # job IDs of the current step's parts
 last_job_id=""
 for ((i=0;i<${num_file};i++)); do
@@ -216,6 +218,14 @@ for ((i=0;i<${num_file};i++)); do
         d="--dependency=${dep}"
     else
         d=""
+    fi
+    if [ "$run_file" != "$prev" ] && [ -f clean.job ] && [ -f clean_steps.txt ]; then   # deletions beside this step
+        targets=$(awk -v s="$run_file" '$1==s {$1=""; print}' clean_steps.txt | xargs)
+        if [ -n "$targets" ]; then
+            C=$(sbatch --parsable $d --export=ALL,STEP="${run_file}",TARGETS="${targets}" clean.job)
+            printf "$fmt_id" "clean_${run_file}" "$C" >> "${id_logfile}"
+            echo "  clean beside ${run_file} (${targets}) - $C"
+        fi
     fi
     ID=$(sbatch --parsable $d --export=ALL,logfile="${logfile}" "${sbatch_file_to_submit}")
     printf "$fmt_id" "${run_file}" "$ID" >> "${id_logfile}"
