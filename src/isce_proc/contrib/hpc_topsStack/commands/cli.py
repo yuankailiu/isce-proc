@@ -103,6 +103,7 @@ def cmd_search(c, extra):
 def cmd_download(c, extra):
     ap = argparse.ArgumentParser(prog='topsstack.py download TEMPLATE')
     ap.add_argument('--needed', action='store_true', help='only the zips the stack VRTs read (reference/, secondarys/)')
+    ap.add_argument('--reference', action='store_true', help='only the zips the reference/ VRTs read (with --needed)')
     ap.add_argument('--verify', action='store_true', help='also CRC-check complete-size zips; re-download bad ones')
     ap.add_argument('--dry-run', action='store_true', help='only report what would be downloaded')
     ap.add_argument('--slurm', type=int, metavar='N', help=f'submit N Slurm array tasks, 1 CPU each (default: asf.shards = {AUTO_DICT["asf.shards"]})', nargs='?', const=0)
@@ -113,11 +114,12 @@ def cmd_download(c, extra):
         print('search_results.csv missing or from other asf.* settings: searching first', flush=True)
         data.search(c)
     if a.slurm is not None:
-        flags = [f for f, on in (('--needed', a.needed), ('--verify', a.verify)) if on]
+        flags = [f for f, on in (('--needed', a.needed), ('--reference', a.reference), ('--verify', a.verify)) if on]
         flags += ['-n', str(a.nproc)] if a.nproc else []
         return data.download_slurm(c, a.slurm or c.asf.shards, flags)
     shard = tuple(map(int, a.shard.split('/'))) if a.shard else None
-    return data.download(c, needed=a.needed, shard=shard, verify=a.verify, dry_run=a.dry_run, nproc=a.nproc)
+    return data.download(c, needed='reference' if a.reference else a.needed, shard=shard, verify=a.verify,
+                         dry_run=a.dry_run, nproc=a.nproc)
 
 
 def cmd_inspect(c, extra):

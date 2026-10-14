@@ -85,11 +85,12 @@ def search(c, extra=()):
 
 
 def _wanted(c, needed):
-    """Granule names to have in the data dir: all search results, or only those the stack's VRTs read."""
+    """Granule names to have in the data dir: all search results, or only those the stack's VRTs read
+    (needed='reference': only the reference/ ones, e.g. after the zips of an update's older dates were deleted)."""
     if needed:
         names = set()
-        for v in glob.glob(os.path.join(c.stack, 'reference', 'IW*', 'burst_[0-9][0-9].slc.vrt')) + \
-                 glob.glob(os.path.join(c.stack, 'secondarys', '*', 'IW*', 'burst_[0-9][0-9].slc.vrt')):
+        sec = [] if needed == 'reference' else glob.glob(os.path.join(c.stack, 'secondarys', '*', 'IW*', 'burst_[0-9][0-9].slc.vrt'))
+        for v in glob.glob(os.path.join(c.stack, 'reference', 'IW*', 'burst_[0-9][0-9].slc.vrt')) + sec:
             try:                                   # only unpacked bursts; skip files vanishing meanwhile
                 names |= set(re.findall(r'/([^/]+)\.zip/', open(v).read()))
             except FileNotFoundError:

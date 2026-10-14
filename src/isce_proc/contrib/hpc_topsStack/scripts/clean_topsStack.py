@@ -217,7 +217,15 @@ def main():
         print(f'keeping the {len(keep)} latest dates: {min(keep) if keep else "-"} .. {max(keep) if keep else "-"}, '
               'and any later date (e.g. SLC zips of an update not processed yet)')
     cutoff = min(keep) if keep else None
-    kept = lambda f: bool(keep) and any(d >= cutoff for d in re.findall(r'(?<!\d)(20\d{6})(?!\d)', os.path.relpath(f, root)))
+    # the reference date as well: reference/ burst VRTs read its zips, and an update's first sub-band row
+    # (ionosphere) re-reads them (d083 south 2026-10-14: deleted with segment 1's zips, step failed)
+    ref = set()
+    if keep:
+        for v in glob.glob(os.path.join(root, 'reference', 'IW*', 'burst_[0-9][0-9].slc.vrt')):
+            ref |= set(re.findall(r'_(20\d{6})T\d{6}_', open(v).read()))
+        print(f'  and the reference date {sorted(ref)}')
+    kept = lambda f: bool(keep) and any(d >= cutoff or d in ref
+                                        for d in re.findall(r'(?<!\d)(20\d{6})(?!\d)', os.path.relpath(f, root)))
     logs = sorted(glob.glob(os.path.join(root, 'run_files', 'clean_topsStack_*.log')))
     total = 0
     print(f'\n{"DELETING" if args.delete else "dry run"}; file lists -> {log}')
