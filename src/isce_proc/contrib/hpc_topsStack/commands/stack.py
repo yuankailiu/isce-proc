@@ -98,12 +98,16 @@ def merge_swath_last(c):
 
 # ---------------------------------------------------------------- pair selection
 def _dates(c):
-    """Acquisition dates from SAFE_files.txt (start time of each SAFE name)."""
+    """Acquisition dates from SAFE_files.txt (start time of each SAFE name), minus isce.excludeDates."""
     dates = set()
     for line in open(os.path.join(c.stack, 'SAFE_files.txt')).read().split():
         m = re.search(r'_(\d{8})T\d{6}_\d{8}T\d{6}_', os.path.basename(line))
         if m:
             dates.add(m.group(1))
+    # isce.excludeDates (stackSentinel --exclude_dates): not in the stack, so not in the index-based network
+    exc = getattr(c.isce, 'excludeDates', None)
+    if exc and str(exc).lower() not in ('auto', 'none', 'no'):
+        dates -= set(re.findall(r'\d{8}', str(exc)))
     return sorted(dates)
 
 
