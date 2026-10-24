@@ -70,7 +70,7 @@ printf "%-35s%-12s%-12s%-12s%-12s\\n" "${{STEP#run_??_}}" "${{STEP:0:6}}" "$SLUR
 
 CLEAN_JOB = """#!/bin/bash
 # Delete intermediate files whose last reader has finished. Submitted by submit_chained_dependencies.sh
-# beside a step, with that step's dependency, as
+# after a step's parts have ended (afterany), as
 #   --export=ALL,STEP=<run_file>,TARGETS="<clean_topsStack targets>"   (clean_steps.txt)
 # No job waits for it. clean_topsStack.py re-checks the kill-after step's outputs before deleting.
 #SBATCH -A {groupname}
@@ -83,7 +83,7 @@ CLEAN_JOB = """#!/bin/bash
 {exclude_line}#SBATCH --output=slurm-clean-%j.out
 
 echo "$(date) clean beside $STEP: $TARGETS"
-{python} clean_topsStack.py $TARGETS --delete -n 16
+{python} clean_topsStack.py $TARGETS --delete -n 4   # few threads: mass deletes disturbed running tasks (SIGBUS, 2026-10-24)
 echo "$(date) done (exit $?)"
 """
 
@@ -451,7 +451,7 @@ def write_job_scripts(inps):
         with open('clean.job', 'w') as outf:
             outf.write(CLEAN_JOB.format(groupname=inps.account, track=inps.track_no, python=sys.executable,
                                         exclude_line=f'#SBATCH --exclude={inps.exclude}\n' if inps.exclude else ''))
-        print(' clean.job + clean_steps.txt (deletions run beside the steps below):')
+        print(' clean.job + clean_steps.txt (deletions run after the steps below have ended):')
     else:
         for f in ('clean_steps.txt', 'clean.job'):
             if os.path.exists(f):

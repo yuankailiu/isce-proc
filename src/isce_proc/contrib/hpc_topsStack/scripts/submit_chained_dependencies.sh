@@ -219,14 +219,6 @@ for ((i=0;i<${num_file};i++)); do
     else
         d=""
     fi
-    if [ "$run_file" != "$prev" ] && [ -f clean.job ] && [ -f clean_steps.txt ]; then   # deletions beside this step
-        targets=$(awk -v s="$run_file" '$1==s {$1=""; print}' clean_steps.txt | xargs)
-        if [ -n "$targets" ]; then
-            C=$(sbatch --parsable $d --export=ALL,STEP="${run_file}",TARGETS="${targets}" clean.job)
-            printf "$fmt_id" "clean_${run_file}" "$C" >> "${id_logfile}"
-            echo "  clean beside ${run_file} (${targets}) - $C"
-        fi
-    fi
     ID=$(sbatch --parsable $d --export=ALL,logfile="${logfile}" "${sbatch_file_to_submit}")
     printf "$fmt_id" "${run_file}" "$ID" >> "${id_logfile}"
     echo "Submitted $((i+1))/${num_file} ${sbatch_file_to_submit} - $ID"
@@ -235,6 +227,16 @@ for ((i=0;i<${num_file};i++)); do
     step_parts="${step_parts:+${step_parts}:}${ID}"
     next=$(basename "${sbatch_files[i+1]:-none}" | cut -d. -f1)
     if [ "$run_file" != "$next" ]; then                        # last part of this step
+        # deletions listed for this step (topsstack jobs --clean) run once all its parts have ended, not beside
+        # them: deleting ~1e5 files while the step reads made 10 tasks fail with SIGBUS (d123, 2026-10-24)
+        if [ -f clean.job ] && [ -f clean_steps.txt ]; then
+            targets=$(awk -v s="$run_file" '$1==s {$1=""; print}' clean_steps.txt | xargs)
+            if [ -n "$targets" ]; then
+                C=$(sbatch --parsable --dependency=afterany:${step_parts} --export=ALL,STEP="${run_file}",TARGETS="${targets}" clean.job)
+                printf "$fmt_id" "clean_${run_file}" "$C" >> "${id_logfile}"
+                echo "  clean after ${run_file} (${targets}) - $C"
+            fi
+        fi
         if $gate && { listed gate_steps.txt "$run_file" || [ "$next" = "none" ]; }; then   # last step: summary mail
             final=""; tl=""; [ "$next" = "none" ] && final=",GATE_FINAL=1" && tl="--time=2:00:00"   # checks all steps + report
             G=$(sbatch --parsable $tl --dependency=afterany:${step_parts} --export=ALL,STEP="${run_file}"${final} gate.job)
