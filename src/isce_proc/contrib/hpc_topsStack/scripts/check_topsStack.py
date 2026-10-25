@@ -179,6 +179,11 @@ def evaluate(step, args, strict=False):
         log = logs.get(r, (None, 'no log'))
         if args.cleaned_ok:
             p = [x for x in p if not x.endswith(': cleaned')]
+        # rows with outputs: a failed or killed latest run (error / no end line) means the outputs may be
+        # partial (d123 2026-10-25: 8 burstRampIon rows timed out with 97-115 of 141 bursts written, gate passed)
+        partial = has_out[r - 1] and (log[1] == 'error' or (strict and log[1] == 'unfinished'))
+        if partial and not p:
+            p = [f'latest log {log[1]} ({log[0]}): outputs may be partial']
         if p or (not has_out[r - 1] and (log[1] == 'error' or (strict and log[1] != 'ok'))):
             rows[r] = (p, log)
     n_cleaned = sum(1 for p, _ in rows.values() if p and all(x.endswith(': cleaned') for x in p))
