@@ -132,6 +132,12 @@ Per-step resources are in `run_files/resources.cfg` (time, CPUs, memory, `batch`
 once). Edit it there and re-run `jobs` before `submit`. To submit only some steps:
 `topsstack.py submit ChileSenAT120.txt -s 13 -e 16` (or `-l 13 15`).
 
+Slurm here queues at most 10000 array tasks per user, less than a whole stack (d123: ~17 900). `--batch`
+splits the steps into blocks of whole steps that fit, submits the first and leaves a detached process that
+submits each next block once the queue has room, after the previous block's final gate (it stops if that gate
+fails): `topsstack.py submit ChileSenAT120.txt --batch` (`--batch 6000`, `-s/-e`, `-d afterok:<id>` work too;
+log `logs/submit_batch_<time>_chain.out`).
+
 ### 7. While it runs
 
 ```bash
@@ -139,6 +145,11 @@ squeue -u $USER
 topsstack.py status ChileSenAT120.txt 13-16             # bad rows per step (missing / wrong-size outputs)
 topsstack.py status ChileSenAT120.txt 15 --rerun --submit   # rerun only the bad rows, re-link the chain
 ```
+
+`topsstack.py watch ChileSenAT120.txt` polls the stack's jobs every 20 min and exits on the first new failed
+task (FAILED, TIMEOUT, OUT_OF_MEMORY, NODE_FAIL), a dependency that can never be satisfied (a step without a
+gate failed), a stall (jobs queued, none running, no task ended for 3 h: e.g. GPU queue) or the end. `--seed`
+marks the failures seen so far as handled; `--once` checks once. Run it in the background and react to its exit.
 
 With `hpc.gate = yes` you get no mail per step. The gate reruns bad rows itself (up to
 `hpc.gateRetries`), then either lets the next step start or stops the chain and mails you the bad

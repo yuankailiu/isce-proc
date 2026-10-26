@@ -29,6 +29,8 @@ EXAMPLE = """examples (from the stack directory, e.g. chile/a076/hpc_topsStack):
   topsstack.py show   ChileSenAT076.txt                  # resolved settings
   topsstack.py jobs   ChileSenAT076.txt                  # write run_files/*.job (+ helpers)
   topsstack.py submit ChileSenAT076.txt -s 17 -e 20      # submit steps 17-20 as an afterok chain
+  topsstack.py submit ChileSenAT076.txt --batch          # all steps in blocks of <= 9000 queued tasks
+  topsstack.py watch  ChileSenAT076.txt --seed           # wait for a failure / stuck chain / stall / the end
   topsstack.py status ChileSenAT076.txt 13-16            # which rows produced their outputs
   topsstack.py status ChileSenAT076.txt 15 --rerun --submit
   topsstack.py clean  ChileSenAT076.txt                  # kill-after table for this stack
@@ -83,7 +85,32 @@ def cmd_submit(c, extra):
     run_files = os.path.join(c.stack, 'run_files')
     if not os.path.isfile(os.path.join(run_files, 'submit_chained_dependencies.sh')):
         sys.exit('run_files/submit_chained_dependencies.sh not found: run `topsstack.py jobs` first')
+    from commands import batch
+    if '--chain' in extra:                                   # the detached part of --batch
+        return batch.chain(extra[extra.index('--chain') + 1])
+    if '--batch' in extra:
+        ap = argparse.ArgumentParser(prog='topsstack.py submit TEMPLATE --batch')
+        ap.add_argument('--batch', nargs='?', type=int, const=9000, metavar='N',
+                        help='blocks of at most N queued tasks (default 9000; QOS limit 10000 per user)')
+        ap.add_argument('-s', type=int, default=1); ap.add_argument('-e', type=int, default=99)
+        ap.add_argument('-d', help='dependency of the first block, e.g. afterok:123')
+        a = ap.parse_args(extra)
+        return batch.submit_batched(c, a.s, a.e, a.d, a.batch)
     return subprocess.run(['bash', 'submit_chained_dependencies.sh', *extra], cwd=run_files).returncode
+
+
+def cmd_watch(c, extra):
+    from commands import batch
+    ap = argparse.ArgumentParser(prog='topsstack.py watch TEMPLATE',
+                                 description='poll the stack jobs; exit 2 on a failed task, a never-satisfiable '
+                                             'dependency or a stall, 0 when nothing is left (see commands/batch.py)')
+    ap.add_argument('--every', type=float, default=20, help='minutes between checks (default %(default)s)')
+    ap.add_argument('--stall', type=float, default=3, help='hours without a task ending, with jobs queued and '
+                                                           'none running (default %(default)s)')
+    ap.add_argument('--once', action='store_true', help='one check (exit 1 if all is well and jobs are left)')
+    ap.add_argument('--seed', action='store_true', help='mark the failed tasks so far as seen, then watch')
+    a = ap.parse_args(extra)
+    return batch.watch(c, a.every, a.stall, a.once, a.seed)
 
 
 def cmd_status(c, extra):
@@ -215,7 +242,8 @@ COMMANDS = {
     'stack':    (cmd_stack,    'run files (run_isce_stack.py); --ion-config; --select-pairs N [BRIDGE]'),
     'show':   (cmd_show,   'print the settings resolved from the template'),
     'jobs':   (cmd_jobs,   'write Slurm job files into run_files/ (write_slurmJobs.py)'),
-    'submit': (cmd_submit, 'submit job files as an afterok chain (submit_chained_dependencies.sh)'),
+    'submit': (cmd_submit, 'submit job files as an afterok chain (submit_chained_dependencies.sh); --batch: queue-sized blocks'),
+    'watch':  (cmd_watch,  'poll the stack jobs until a failure, a stuck dependency, a stall or the end'),
     'status': (cmd_status, 'check outputs per row, optionally rerun bad rows (check_topsStack.py)'),
     'clean':  (cmd_clean,  'delete intermediate files after their last reader (clean_topsStack.py)'),
     'report': (cmd_report, 'per-step time, CPU/GPU, memory, cost, disk use (sacct) -> logs/report_<date>.*, pic/report.png'),
