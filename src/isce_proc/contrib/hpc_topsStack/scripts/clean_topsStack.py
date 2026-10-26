@@ -61,7 +61,10 @@ def rules(zip_vrt, virtual, ion):
                             None if virtual else 'merge_reference_secondary_slc',
                             'burst geometry; merged/geom_reference VRTs read it if virtual_merge'),
         'burst_slc':       (['coreg_secondarys/*/IW*/burst_[0-9][0-9].slc'],
-                            'filter_coherence' if virtual else 'generate_burst_igram',
+                            # always after filter_coherence: its complex coherence (fine.cor) reads the merged
+                            # SLCs, which can be VRTs onto these bursts even without virtual_merge (d083 south
+                            # update, 2026-10-13: bursts deleted first, fine.cor 97-99.5 % zero in 1313 pairs)
+                            'filter_coherence',
                             'coregistered full-band burst SLCs'),
         'coreg_offset':    (['coreg_secondarys/*/IW*/range_[0-9][0-9].off', 'coreg_secondarys/*/IW*/azimuth_[0-9][0-9].off'],
                             'subband_and_resamp' if ion else 'fullBurst_resample',
