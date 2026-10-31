@@ -290,7 +290,7 @@ def extent_tradeoff_table(ext, nrow=14):
 
 
 def plot_groups(groups, colors, extents=None, outfile='epochs_latlon.png',
-                merge=True, show=True, shade=True):
+                merge=False, show=True, shade=True):
     """Plots the latitude spans over time for each group."""
     plt.rcParams.update({
         'font.size': 12,
@@ -339,7 +339,8 @@ def plot_groups(groups, colors, extents=None, outfile='epochs_latlon.png',
                + (f"  [{label}]" if label != 'all' else ''))
         legend_elements[key] = Line2D([0], [0], color='k', ls='--', lw=1.4)
 
-    ax.legend(handles=legend_elements.values(), labels=legend_elements.keys(), loc='best')
+    ax.legend(handles=legend_elements.values(), labels=legend_elements.keys(),
+              loc='upper left', bbox_to_anchor=(1.01, 1.0), fontsize=10)    # outside: never covers the bars
 
     ax.set_xlabel("Acquisition Time")
     ax.set_ylabel("Latitude (South to North)")
@@ -409,8 +410,10 @@ def main():
     parser.add_argument('-g', '--group-by', dest='group_by', type=str, nargs='+',
         choices=GROUP_FIELDS + ['none'], default=None, metavar='FIELD',
         help='override auto grouping: source|platform|path|direction|none')
+    parser.add_argument('--merge', dest='merge', action='store_true',
+        help='draw one merged S-N span per pass instead of each frame (hides along-track gaps between frames)')
     parser.add_argument('--no-merge', dest='merge', action='store_false',
-        help='draw each frame, not one merged span per pass')
+        help='draw each frame (default)')
 
     keep = parser.add_argument_group(
         'keep-window',

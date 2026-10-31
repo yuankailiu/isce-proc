@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Acquisitions after `select`: latitude span per date (top) and the interferogram network (bottom).
 
-Top: one bar per date from the slice footprints in search_results.csv; kept dates (zips in the
+Top: one bar per slice (frame) footprint in search_results.csv, so along-track gaps between the frames of a
+date show; kept dates (zips in the
 data dir) colored by platform, dates moved to not_used/ in grey, the select south/north bound dashed.
 Bottom: kept dates on one row per starting-range group (IW1/IW2/IW3 starting ranges from
 s1_version.txt; the ionosphere pairing groups by these; the IPF versions of each group are listed). Pairs are arcs (height ~ temporal baseline);
@@ -42,8 +43,10 @@ def load(data):
     for r in csv.DictReader(open(os.path.join(data, 'search_results.csv'))):
         d = date_of(r['Granule Name'])
         lats = [float(r[k]) for k in ('Near Start Lat', 'Far Start Lat', 'Near End Lat', 'Far End Lat')]
-        a = acq.setdefault(d, dict(s=90, n=-90, platform=r['Granule Name'][:3], kept=d in kept, moved=d in moved))
+        a = acq.setdefault(d, dict(s=90, n=-90, frames=[], platform=r['Granule Name'][:3], kept=d in kept,
+                                   moved=d in moved))
         a['s'], a['n'] = min(a['s'], *lats), max(a['n'], *lats)
+        a['frames'].append((min(lats), max(lats)))
     return acq
 
 
@@ -110,7 +113,8 @@ def main():
     w = 6                                                            # bar width [days]
     for d, v in sorted(acq.items()):
         c = COLORS.get(v['platform'], 'k') if v['kept'] else GREY
-        ax1.bar(t(d), v['n'] - v['s'], bottom=v['s'], width=w, color=c, lw=0)
+        for fs, fn in v['frames']:                                   # each frame: gaps between frames show
+            ax1.bar(t(d), fn - fs, bottom=fs, width=w, color=c, lw=0)
     hs = [Patch(color=c, label=f'{p} kept ({k})') for p, c in COLORS.items()
           if (k := sum(v['kept'] and v['platform'] == p for v in acq.values()))]
     hs.append(Patch(color=GREY, label=f'not used ({sum(not v["kept"] for v in acq.values())})'))
