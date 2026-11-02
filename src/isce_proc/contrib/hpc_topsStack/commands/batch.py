@@ -56,7 +56,10 @@ def plan_blocks(steps, start, end, limit):
         n += k
     if cur:
         blocks.append(cur)
-    return [dict(start=b[0][0], end=b[-1][0], last=b[-1][1], tasks=sum(x[2] for x in b)) for b in blocks]
+    # wait on the last step that has jobs: a fused step (no job file, 0 tasks) submits nothing (a149_south
+    # 2026-11-02: block 01-13 ended on run_13_generate_burst_igram, no IDs found, later blocks never submitted)
+    last = lambda b: next((x[1] for x in reversed(b) if x[2]), b[-1][1])
+    return [dict(start=b[0][0], end=b[-1][0], last=last(b), tasks=sum(x[2] for x in b)) for b in blocks]
 
 
 def _submit(stack, template, start, end, dep, log):
