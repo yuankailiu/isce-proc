@@ -223,9 +223,12 @@ def deletion_lines(clean):
     nums = sorted(steps.values())
     attach = {}
     for target, (_, kill, _) in clean_topsStack.rules(zip_vrt, virtual, ion).items():
-        if kill in steps and steps[kill] < nums[-1]:
-            nxt = next(n for n in nums if n > steps[kill])
-            attach.setdefault(nxt, []).append(target)
+        if target == 'exported' or kill not in steps:              # exported: by hand after `export` only
+            continue
+        # after the step following the kill-after step; a kill-after step that is the last step (mergeBurstRampIon:
+        # ion_burst_ramp, 8.2 TB in d123) after itself: clean.job waits for all parts of that step to end
+        nxt = next((n for n in nums if n > steps[kill]), steps[kill])
+        attach.setdefault(nxt, []).append(target)
     return {n: ' '.join(t) for n, t in attach.items()}
 
 

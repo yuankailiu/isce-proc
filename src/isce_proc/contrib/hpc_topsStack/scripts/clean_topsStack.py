@@ -13,6 +13,7 @@ Run from the stack directory (the one holding run_files/) or from run_files/.
   clean_topsStack.py coarse_igram burst_igram       # dry run: count files and sizes
   clean_topsStack.py coarse_igram burst_igram --delete
   clean_topsStack.py coarse_igram burst_igram --delete --reuse   # use the dry-run list, no new search
+  clean_topsStack.py exported --export-dir DIR --delete      # exported products, only where DIR has a same-size copy
 With --delete, each target is deleted only if its kill-after step has all its outputs
 (checked row by row with check_topsStack.py; Slurm COMPLETED alone is not proof).
 """
@@ -82,7 +83,35 @@ def rules(zip_vrt, virtual, ion):
                             'computeIon', 'merged sub-band interferograms'),
         'ion_burst_ramp':  (['ion_burst_ramp_dates/*/IW*/burst*.float'],
                             'mergeBurstRampIon', 'burst-level ionosphere ramps'),
+        # not part of "all": needs --export-dir; a file goes only if its copy there has the same size
+        'exported':        (EXPORTED, 'mergeBurstRampIon' if ion else 'unwrap',
+                            'products copied by `topsstack.py export` (only where --export-dir has the same file, same size)'),
     }
+
+
+# products of `topsstack.py export` (commands/export.py ITEMS), as stack-relative file globs; merged/geom_reference
+# is exported to geom_reference/ (without *.full*, so those stay here)
+EXPORTED = ['merged/interferograms/*/*', 'ion/*/ion_cal/*', 'ion_dates/*', 'ion_azshift_dates/*',
+            'ion_burst_ramp_merged_dates/*', 'merged/geom_reference/*']
+
+
+def export_copy(rel):
+    """Path of a stack-relative file in the export directory."""
+    return rel.replace('merged/geom_reference/', 'geom_reference/', 1) if rel.startswith('merged/geom_reference/') else rel
+
+
+def only_exported(files, root, export_dir, nproc):
+    """The files whose copy in export_dir exists with the same size (the others are kept)."""
+    def same(item):
+        f, size = item
+        try:
+            return os.stat(os.path.join(export_dir, export_copy(os.path.relpath(f, root)))).st_size == size
+        except OSError:
+            return False
+    items = list(files.items())
+    with ThreadPoolExecutor(nproc) as ex:
+        ok = list(ex.map(same, items))
+    return {f: v for (f, v), k in zip(items, ok) if k}
 
 
 def find(root, patterns, nproc):
@@ -185,11 +214,15 @@ def main():
     ap.add_argument('--no-check', action='store_true',
                     help='with --delete: skip checking that the kill-after step produced all its outputs')
     ap.add_argument('-n', '--nproc', type=int, default=32, help='parallel threads (default: %(default)s)')
+    ap.add_argument('--export-dir', metavar='DIR',
+                    help='target "exported": the hpc.exportDir copy to compare with (topsstack.py clean sets it)')
     ap.add_argument('--keep-last', type=int, default=0, metavar='N',
                     help='keep the files of the N latest dates of coreg_secondarys/ and of every later date (a path '
                          'containing such a date, e.g. coreg_secondarys/<date>/, merged/SLC/<date>/, an SLC zip of '
                          'that date), e.g. for the pairs of a later update that connect to them')
     args = ap.parse_args()
+    if '#' in ' '.join(args.targets):            # a trailing comment of clean_steps.txt passed on as targets
+        args.targets = ' '.join(args.targets).split('#')[0].split()
 
     root = os.getcwd()
     if not os.path.isdir(os.path.join(root, 'run_files')):
@@ -207,7 +240,9 @@ def main():
     if not args.targets:
         return
 
-    targets = list(table) if 'all' in args.targets else args.targets
+    targets = [t for t in table if t != 'exported'] if 'all' in args.targets else args.targets
+    if 'exported' in targets and not (args.export_dir and os.path.isdir(args.export_dir)):
+        sys.exit(f'target "exported" needs --export-dir with the exported copy (got {args.export_dir})')
     bad = [t for t in targets if t not in table]
     if bad:
         sys.exit(f'unknown target(s): {bad}')
@@ -249,6 +284,10 @@ def main():
                 files = find(root, pats, args.nproc)
             if keep:
                 files = {f: v for f, v in files.items() if not kept(f)}
+            if t == 'exported':
+                n0 = len(files)
+                files = only_exported(files, root, args.export_dir, args.nproc)
+                print(f'  {t:16s} {len(files)} of {n0} files have the same-size copy in {args.export_dir}; the rest are kept')
             size = sum(files.values())
             fl.write(f'## {datetime.now():%F %T} {t} delete={args.delete} after={kill(k)} '
                      f'files={len(files)} bytes={size}' + (f' keep_last={args.keep_last}' if keep else '') + '\n' + ''.join(f + '\n' for f in sorted(files)))

@@ -119,6 +119,8 @@ def cmd_status(c, extra):
 
 
 def cmd_clean(c, extra):
+    if 'exported' in extra and '--export-dir' not in extra and c.hpc.exportDir:
+        extra = [*extra, '--export-dir', c.hpc.exportDir]          # compare with the export target of the template
     with _in(c.stack):
         return _run_script_main('clean_topsStack', extra)
 
