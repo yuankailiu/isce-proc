@@ -241,6 +241,8 @@ def main():
         return
 
     targets = [t for t in table if t != 'exported'] if 'all' in args.targets else args.targets
+    if 'exported' in targets:                    # last: it removes the outputs the other targets' checks look for
+        targets = [t for t in targets if t != 'exported'] + ['exported']
     if 'exported' in targets and not (args.export_dir and os.path.isdir(args.export_dir)):
         sys.exit(f'target "exported" needs --export-dir with the exported copy (got {args.export_dir})')
     bad = [t for t in targets if t not in table]
