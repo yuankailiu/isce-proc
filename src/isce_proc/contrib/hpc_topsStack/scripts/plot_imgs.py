@@ -22,58 +22,7 @@ import shutil
 IM = "magick" if shutil.which("magick") else "convert"   # ImageMagick 7 / 6
 
 
-NAV_CSS = """
-#nav{position:fixed;top:0;left:0;right:0;z-index:10;background:#f4f4f4;border-bottom:1px solid #bbb;
-     font:13px sans-serif;padding:4px 8px;display:flex;flex-wrap:wrap;gap:10px;align-items:center}
-#nav select,#nav input,#nav button{font:13px sans-serif}
-#nav .grp{display:flex;gap:3px;align-items:center}
-#top{position:fixed;right:14px;bottom:14px;z-index:10;font:14px sans-serif;padding:6px 10px;
-     border:1px solid #888;border-radius:4px;background:#fff;cursor:pointer}
-#board{padding-top:44px}
-.flash{animation:flash .45s 4}
-@keyframes flash{50%{opacity:.15}}
-"""
-NAV_JS = """
-const order = ORDER;
-function go(name){
-  const g = document.getElementById('p_' + name);
-  if (!g) { alert(name + ': not in this collage'); return; }
-  const r = g.getBoundingClientRect(), h = document.getElementById('nav').offsetHeight;
-  window.scrollTo({top: window.scrollY + r.top - h - 40, behavior: 'smooth'});
-  g.classList.remove('flash'); void g.getBoundingClientRect(); g.classList.add('flash');
-}
-function step(sel, d){            // previous / next entry of one group
-  const n = sel.options.length - 1; if (n < 1) return;
-  let i = sel.selectedIndex + d; if (i < 1) i = n; if (i > n) i = 1;
-  sel.selectedIndex = i; go(sel.value);
-}
-function find(v){                 // a pair, or the first image containing a date
-  v = v.trim().replace('-', '_'); if (!v) return;
-  go(order.includes(v) ? v : (order.find(x => x.includes(v)) || v));
-}
-"""
-
-
-def collage_html(svg, title, order, groups):
-    """collage.html: the SVG plus a fixed bar with one jump menu per highlight group, a pair/date search box and a
-    back-to-top button. groups: [(label, color, names in collage order)]."""
-    import html, json
-    sel = "".join(
-        f'<span class="grp"><button onclick="step(this.nextElementSibling,-1)">&#9664;</button>'
-        f'<select style="color:{c}" onchange="if(this.value)go(this.value)">'
-        f'<option value="">{html.escape(lab)} ({len(n)})</option>'
-        + "".join(f'<option value="{x}">{x}</option>' for x in n)
-        + f'</select><button onclick="step(this.previousElementSibling,1)">&#9654;</button></span>'
-        for lab, c, n in groups if n)
-    nav = (f'<div id="nav"><b>{html.escape(os.path.basename(os.path.normpath(title)))}</b> {len(order)} images {sel}'
-           '<span class="grp"><input id="q" list="all" size="19" placeholder="pair or date" '
-           'onkeydown="if(event.key===\'Enter\')find(this.value)">'
-           '<button onclick="find(document.getElementById(\'q\').value)">go</button></span>'
-           '<datalist id="all">' + "".join(f'<option value="{x}">' for x in order) + '</datalist></div>'
-           '<button id="top" onclick="window.scrollTo({top:0,behavior:\'smooth\'})">&#9650; top</button>')
-    return ("<!DOCTYPE html><html><head><meta charset='utf-8'><title>Collage</title>"
-            f"<style>body{{margin:0}}{NAV_CSS}</style></head><body>\n{nav}\n<div id='board'>\n{svg}\n</div>\n"
-            f"<script>{NAV_JS.replace('ORDER', json.dumps(order))}</script>\n</body></html>\n")
+from collage_nav import collage_html    # noqa: E402  (fixed bar: jump menus, search, back to top)
 
 
 def cmdLineParse():
