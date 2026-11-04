@@ -35,6 +35,13 @@ def export(c, dry_run=False, nproc=4, run_files_to=None):
         sys.exit('set hpc.exportDir in the template (target directory for the copy)')
     if not dry_run:
         os.makedirs(target, exist_ok=True)
+    if not dry_run:                                   # ion network connectivity next to the products (ion_network*.txt)
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'scripts'))
+            import ion_network
+            ion_network.main([c.stack])
+        except Exception as e:                        # never block an export on the report
+            print(f'ion_network.py: {e}')
     jobs = []
     for pattern, opts in ITEMS:
         if pattern == 'run_files' and run_files_to:            # e.g. an update stack: keep the target's run_files/
