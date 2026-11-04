@@ -198,7 +198,10 @@ def unfinished(root, steps, kill, nproc):
     old = os.getcwd()
     os.chdir(os.path.join(root, 'run_files'))
     try:
-        _, bad, _ = chk.evaluate(run, SimpleNamespace(nproc=nproc, cleaned_ok=False, verbose=False))
+        # strict: a row of a log-only step needs an OK log; without it a step that never ran (cancelled after the
+        # chain stopped) counted as done and clean.job (afterany) deleted the overlap SLCs and ESD files before
+        # timeseries_misreg ran (a120_south2 2026-11-03, 3.0 TB; the 3 new ESD pairs then could not run)
+        _, bad, _ = chk.evaluate(run, SimpleNamespace(nproc=nproc, cleaned_ok=False, verbose=False), strict=True)
     finally:
         os.chdir(old)
     return f'{len(bad)} rows of {run} lack their outputs' if bad else ''
