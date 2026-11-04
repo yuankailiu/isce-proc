@@ -259,6 +259,21 @@ def _ctx():
             os.path.dirname(os.getcwd()))
 
 
+def _never_ran(step):
+    """True if every job of `step` in the latest job_id_logfile ended CANCELLED without running."""
+    ids = []
+    for f in sorted(glob.glob('job_id_logfile_*.txt'), key=os.path.getmtime, reverse=True):   # newest file listing it
+        ids = [ln.split()[-1] for ln in open(f) if ln.split() and ln.split()[0] == step]
+        if ids:
+            break
+    if not ids:
+        return False
+    out = subprocess.run(['sacct', '-n', '-X', '-P', '-j', ','.join(ids), '-o', 'State,ElapsedRaw'],
+                         capture_output=True, text=True).stdout.split()
+    rows = [r.split('|') for r in out if '|' in r]
+    return bool(rows) and all(st.startswith('CANCELLED') and el == '0' for st, el in rows)
+
+
 def gate(step, args, retries):
     """Gate job between two steps (gate.job, afterany on all parts of `step`). Exits in minutes:
     - all rows good                      -> exit 0 (the next step, afterok on this gate, starts)
@@ -300,6 +315,12 @@ Next:
 Gate log: {os.getcwd()}/slurm-gate-{os.environ.get('SLURM_JOB_ID', '?')}.out
 """
         notify(f'[topsstack {track}] STOPPED at step {num} ({step[7:]}): {len(bad)} rows bad after {retries} reruns', body)
+        return 1
+    if attempt == 0 and _never_ran(step):
+        # the step's jobs were cancelled before starting (an earlier step failed for good: dependency never
+        # satisfied); rerunning it would run without its inputs (a120_south2 2026-11-03: step 09 reran all 124
+        # rows while step 08 had never run, offsets made without the ESD misregistration)
+        print(f'gate {step}: its jobs never ran (cancelled, upstream chain stopped); no reruns, stopping here')
         return 1
     me = os.environ.get('SLURM_JOB_ID')
     print(f'gate {step}: rerun {attempt + 1}/{retries} of {len(bad)} rows')
