@@ -30,10 +30,20 @@ def _ionqc_lists(c, tmp):
     import csv
     f = sorted(glob.glob(os.path.join(c.stack, 'logs', 'ionqc_*.csv')))
     rows = list(csv.DictReader(open(f[-1]))) if f else []
+    # excluded = ionqc 'exclude' plus the --exc_pair list of run_NN_invertIon (pairs excluded by hand too;
+    # a003_s1b 2026-11-03: 20211022_20211127 was in run_24 but not red)
+    import re
+    run = [g for g in glob.glob(os.path.join(c.stack, 'run_files', 'run_[0-9][0-9]_invertIon'))]
+    exc = set(re.findall(r'\d{8}_\d{8}', ' '.join(re.findall(r'--exc_pair((?:\s+\d{8}_\d{8})+)', open(run[0]).read())))) \
+        if run else set()
+    lists = {'EXCLUDE': [r['pair'] for r in rows if r.get('status', '').startswith('exclude')],
+             'CHECK': [r['pair'] for r in rows if r.get('status', '') == 'check']}
+    lists['EXCLUDE'] = sorted(set(lists['EXCLUDE']) | exc)
+    lists['CHECK'] = [p for p in lists['CHECK'] if p not in exc]
     out = {}
-    for key, test in (('CHECK', lambda s: s == 'check'), ('EXCLUDE', lambda s: s.startswith('exclude'))):
+    for key, pairs in lists.items():
         out[key] = os.path.join(tmp, key.lower() + '.txt')
-        open(out[key], 'w').write('\n'.join(r['pair'] for r in rows if test(r.get('status', ''))) + '\n')
+        open(out[key], 'w').write('\n'.join(pairs) + '\n')
     return out
 
 
