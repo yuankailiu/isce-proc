@@ -29,6 +29,7 @@ isce.virtualMerge       = no                         #[yes / no], auto for no, u
 isce.coregistration     = geometry                   #[geometry / NESD], auto for geometry
 isce.swathNum           = 1,2                        #[1,2,3], auto for '1,2,3'
 isce.numConnection      = 5                          #[int>=1], auto for 3
+isce.numOverlapConnections = auto                    #[int>=1] ESD (burst-overlap) pairs per date (stackSentinel -O); more for BOI, auto for 3
 isce.orbitDir           = ~/bak/aux/aux_poeorb/      #Directory with all orbit files
 isce.auxDir             = ~/bak/aux/aux_cal/         #Directory with all aux   files
 isce.startDate          = none                       #[20140825 / no], auto for none (1st date)
@@ -134,6 +135,7 @@ AUTO_DICT = {
     'isce.endDate'            : None,
     'isce.numProcess4topo'    : None,
     'isce.updateMode'         : True,
+    'isce.numOverlapConnections' : '3',
     'isce.numConnectionIon'   : '3',
     'isce.numConnectionIonBridge' : '5',
     'isce.ionExtraPairs'      : None,

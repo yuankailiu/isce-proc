@@ -407,6 +407,7 @@ def prep_stack(iDict):
         iargs += [
             '--coregistration',  iDict['coregistration'],
             '--num_connections', iDict['numConnection'],
+            '--num_overlap_connections', str(iDict.get('numOverlapConnections') or 3),
             '--aux_directory',   iDict['auxDir'],
             '--orbit_directory', iDict['orbitDir'],
             '--virtual_merge',   str(iDict['virtualMerge']),
