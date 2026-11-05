@@ -192,6 +192,13 @@ def watch(c, every=20, stall=3.0, once=False, seed=False):
         q = _sh(f'squeue -h -j {",".join(ids)} -o "%i|%j|%T|%r"').splitlines() if ids else []
         never = [x for x in q if 'DependencyNeverSatisfied' in x]
         running = [x for x in q if '|RUNNING|' in x]
+        # an array left on reason JobArrayTaskLimit with no task running is stuck (seen 2026-11-03/04 on
+        # filter_coherence of a149_south and a120_south2, for hours); re-setting its throttle releases it
+        for jid in sorted({x.split('|')[0].split('_')[0] for x in q if x.endswith('|JobArrayTaskLimit')}):
+            if not any(x.startswith(jid + '_') and '|RUNNING|' in x for x in q):
+                t = re.search(r'ArrayTaskThrottle=(\d+)', _sh(f'scontrol show job {jid}'))
+                _sh(f'scontrol update jobid={jid} ArrayTaskThrottle={t.group(1) if t else 200}')
+                print(f'{dt.datetime.now():%F %T} {jid}: stuck on JobArrayTaskLimit with none running; throttle re-set', flush=True)
         ends = [r[3] for r in rows if r[3] not in ('Unknown', '', 'None')]
         last = max(ends) if ends else None
         age = (dt.datetime.now() - dt.datetime.fromisoformat(last)).total_seconds() / 3600 if last else 0
