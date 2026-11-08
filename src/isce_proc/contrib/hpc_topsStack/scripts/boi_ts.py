@@ -44,13 +44,21 @@ def get_args(iargs=None):
     p.add_argument('--chunk', type=int, default=4000)
     p.add_argument('--tag', default=None, help='output name suffix (default: ion_<ion>_mask)')
     p.add_argument('--out', default=None, help='default: boidir')
+    p.add_argument('--inject', type=float, nargs=2, default=None, metavar=('RATE', 'LAT'),
+                   help='synthetic test: add RATE mm/yr along the heading (o > 0) to pixels north of LAT')
     return p.parse_args(iargs)
 
 
+INJ = {}                                             # synthetic test: swath id -> (per-pixel rate [lines/yr], dt_p [yr])
+
+
 def row(h, n, cor_min):
-    """pair n of one swath: o (NaN where cor < cor_min), iota, cor."""
+    """pair n of one swath: o (NaN where cor < cor_min), iota, cor. With --inject: o += rate * dt_p."""
     cor = h['cor'][n].astype(np.float32)
     o = h['o'][n].astype(np.float32); o[cor < cor_min] = np.nan
+    if INJ:
+        rate, dtp = INJ[h.attrs['swath']]
+        o += (rate * dtp[n]).astype(np.float32)
     io = h['iota'][n].astype(np.float32) if h.attrs['has_ion'] else np.zeros_like(o)
     io[~np.isfinite(o)] = np.nan
     return o, io, cor
@@ -88,6 +96,12 @@ def main(iargs=None):
         i, j = p.split('_'); A[n, di[j]] += 1; A[n, di[i]] -= 1
     keep = np.array([d != ref for d in dates])
     Ar = A[:, keep]; m = Ar.shape[1]
+    if a.inject:
+        dtp = np.array([(datetime.strptime(q.split('_')[1], '%Y%m%d') - datetime.strptime(q.split('_')[0], '%Y%m%d')).days
+                        for q in pairs]) / 365.25
+        for h in H.values():
+            INJ[h.attrs['swath']] = (np.where(h['lat'][:] > a.inject[1], a.inject[0] / 1e3 / h['dx_az'][:], 0.0), dtp)
+        print(f'SYNTHETIC: +{a.inject[0]} mm/yr along heading north of {a.inject[1]} N', flush=True)
     P = (Ar[:, :, None] * Ar[:, None, :]).reshape(npair, m * m)
     D = np.diff(np.eye(nd), axis=0)[:, keep]
     R = D.T @ D * a.damp * np.abs(A).sum(0).mean()
