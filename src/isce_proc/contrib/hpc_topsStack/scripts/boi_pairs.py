@@ -118,7 +118,8 @@ def geometry(stack, la, lr):
 
 
 def check_freq(stack, G, pairs, ref_date):
-    """assert freq_true = stored freq / 3 (pair reference = stack reference) or / 4 (other pairs)."""
+    """assert stored freq / freq_true = 1 (topsStack with the ESD fix, isce2 branch fix.esd-freq) or 3 / 4 (unfixed:
+    pair reference = stack reference / other pairs). BOI uses freq_true in both cases."""
     p3 = next((p for p in pairs if p.startswith(ref_date)), None)
     p4 = next((p for p in pairs if not p.startswith(ref_date)), None)
     for p, k in ((p3, 3.0), (p4, 4.0)):
@@ -132,9 +133,11 @@ def check_freq(stack, G, pairs, ref_date):
             st = np.fromfile(f, dtype=np.float32).reshape(o['shape5'])
             m = st != 0
             r = np.median(st[m] / o['freq'][m])
-            print(f'freq check {p} IW{sw} ovl {o["ii"]:02d}: stored/true = {r:.4f} (expected {k:.0f}); '
+            fixed = abs(r - 1) < 0.015
+            print(f'freq check {p} IW{sw} ovl {o["ii"]:02d}: stored/true = {r:.4f} '
+                  f'({"fixed topsStack" if fixed else f"unfixed, expected {k:.0f}"}); '
                   f'true {np.median(o["freq"][m]) / (2 * np.pi * o["dt"]):.0f} Hz')
-            assert abs(r / k - 1) < 0.015, f'freq ratio {r:.4f} != {k}'
+            assert fixed or abs(r / k - 1) < 0.015, f'freq ratio {r:.4f} is neither 1 nor {k:.0f}'
 
 
 _W = {}
