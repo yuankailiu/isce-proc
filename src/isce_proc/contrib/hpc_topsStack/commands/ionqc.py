@@ -86,8 +86,10 @@ def _ion(c, p, name='filt.ion', step=1):
     return np.where(_mask(c, p, step), a, np.nan)
 
 
-def _connected(pairs):
-    """True if the pairs connect all their dates (union-find)."""
+def _connected(pairs, dates=None):
+    """True if the pairs connect all `dates` (default: the dates of `pairs`) into one network (union-find).
+    Pass all dates of the stack: a date whose pairs are all excluded must count as disconnected (d054 20210809,
+    a003_s1c 20250416/20250428 were isolated because only the dates of the remaining pairs were checked)."""
     par = {}
 
     def root(a):
@@ -99,7 +101,8 @@ def _connected(pairs):
     for p in pairs:
         a, b = p.split('_')
         par[root(a)] = root(b)
-    return len({root(d) for p in pairs for d in p.split('_')}) == 1
+    dates = set(dates) if dates is not None else {d for p in pairs for d in p.split('_')}
+    return bool(dates) and len({root(d) for d in dates}) == 1
 
 
 def _robust(v, floor, nmad):
@@ -521,13 +524,14 @@ def ionqc(c, raw=False, closure_test=True, unw=False, apply=False, nproc=8, step
         rows.append([p, dt, rs.get(p, np.nan), n, s_] + (list(r) if r else [np.nan] * len(dists)) + ['; '.join(why)])
 
     # keep the network connected: remove the worst first; keep a pair whose removal splits it
+    all_dates = {d for q in pairs for d in q.split('_')}
     def worst(p):
         return -(np.nan_to_num(clo[p][0]) + np.nan_to_num(rs.get(p, 0)) + (1 - cov[p][0] if p in cov_bad else 0))
     exc, keep_bridge = [q for q in old if q in pairs], []
     for p in sorted(bad, key=worst):
         if p in exc:
             continue
-        if _connected([q for q in pairs if q not in exc + [p]]):
+        if _connected([q for q in pairs if q not in exc + [p]], all_dates):
             exc.append(p)
         else:
             keep_bridge.append(p)
@@ -556,7 +560,7 @@ def ionqc(c, raw=False, closure_test=True, unw=False, apply=False, nproc=8, step
     # the epochs). There the pair IS the network's prediction; judge them with interferograms that span
     # them, and do not restore an excluded one on closure alone (a120_south 2026-09-22).
     used = [q for q in pairs if q not in exc]
-    bridges = [q for q in used if not _connected([x for x in used if x != q])] if len(used) < 3000 else []
+    bridges = [q for q in used if not _connected([x for x in used if x != q], all_dates)] if len(used) < 3000 else []
     weak = set(bridges) | {q for q in pairs if clo[q][1] == 0}
     new = sorted(set(exc) - set(old))
     clean_old = sorted(q for q in old if q in pairs and q not in bad and q not in weak)
