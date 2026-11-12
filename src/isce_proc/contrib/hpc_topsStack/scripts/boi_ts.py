@@ -41,7 +41,11 @@ def get_args(iargs=None):
     p.add_argument('--gt-min', type=float, default=0.7)
     p.add_argument('--min-pairs', type=int, default=100)
     p.add_argument('--damp', type=float, default=1e-3)
-    p.add_argument('--chunk', type=int, default=4000)
+    p.add_argument('--chunk', type=int, default=200, help='pixels per batched SBAS solve')
+    p.add_argument('--dense-max', type=float, default=2e7, help='use a dense pair matrix below npair*m*m (else sparse)')
+    p.add_argument('--block', type=int, default=50000, help='pixels read per block (memory: npair x block x 4 B)')
+    p.add_argument('--t0', default=None, help='YYYYMMDD: use only dates >= t0 (e.g. Li 2024 window 2014-2021)')
+    p.add_argument('--t1', default=None, help='YYYYMMDD: use only dates <= t1')
     p.add_argument('--tag', default=None, help='output name suffix (default: ion_<ion>_mask)')
     p.add_argument('--out', default=None, help='default: boidir')
     p.add_argument('--inject', type=float, nargs=2, default=None, metavar=('RATE', 'LAT'),
@@ -94,15 +98,39 @@ def main(iargs=None):
     A = np.zeros((npair, nd))
     for n, p in enumerate(pairs):
         i, j = p.split('_'); A[n, di[j]] += 1; A[n, di[i]] -= 1
-    keep = np.array([d != ref for d in dates])
-    Ar = A[:, keep]; m = Ar.shape[1]
     if a.inject:
         dtp = np.array([(datetime.strptime(q.split('_')[1], '%Y%m%d') - datetime.strptime(q.split('_')[0], '%Y%m%d')).days
                         for q in pairs]) / 365.25
         for h in H.values():
             INJ[h.attrs['swath']] = (np.where(h['lat'][:] > a.inject[1], a.inject[0] / 1e3 / h['dx_az'][:], 0.0), dtp)
         print(f'SYNTHETIC: +{a.inject[0]} mm/yr along heading north of {a.inject[1]} N', flush=True)
-    P = (Ar[:, :, None] * Ar[:, None, :]).reshape(npair, m * m)
+    # optional time window: dates in [t0, t1], pairs with both dates inside; psel = row indices in the h5 files
+    dsel = np.array([(a.t0 is None or d >= a.t0) and (a.t1 is None or d <= a.t1) for d in dates])
+    psel = np.where([dsel[di[q.split('_')[0]]] and dsel[di[q.split('_')[1]]] for q in pairs])[0]
+    if not dsel.all():
+        dates = dates[dsel]; t = t[dsel] - t[dsel][0]; A = A[np.ix_(psel, np.where(dsel)[0])]
+        di = {d: k for k, d in enumerate(dates)}
+        if ref not in di:
+            ref = dates[0]                        # zero date only; the velocity does not depend on it
+        tag = tag + f'_{dates[0]}_{dates[-1]}'
+    else:
+        A = A[psel]
+    pairs = pairs[psel]; npair, nd = len(pairs), len(dates)
+    keep = np.array([d != ref for d in dates])
+    Ar = A[:, keep]; m = Ar.shape[1]
+    # normal matrix per pixel N = Ar^T diag(w) Ar = w @ P, P sparse (<= 4 entries per pair)
+    from scipy import sparse
+    Pd = (Ar[:, :, None] * Ar[:, None, :]).reshape(npair, m * m) if npair * m * m < a.dense_max else None
+    if Pd is None:
+        rr, cc, vv = [], [], []
+        for n in range(npair):
+            nz = np.nonzero(Ar[n])[0]
+            for q in nz:
+                for r_ in nz:
+                    rr.append(n); cc.append(q * m + r_); vv.append(Ar[n, q] * Ar[n, r_])
+        P = sparse.csr_matrix((vv, (rr, cc)), shape=(npair, m * m))
+    else:
+        P = Pd
     D = np.diff(np.eye(nd), axis=0)[:, keep]
     R = D.T @ D * a.damp * np.abs(A).sum(0).mean()
     print(f'{npair} pairs, {nd} dates ({t[-1]:.2f} yr), ref {ref}, ion {a.ion}, cor >= {a.cor_min}, '
@@ -111,8 +139,8 @@ def main(iargs=None):
     # pass 1 (streamed per pair): per-pair scene medians of o and iota
     T0 = time.time()
     co = np.full(npair, np.nan); ci = np.full(npair, np.nan)
-    for n in range(npair):
-        r = [row(h, n, a.cor_min) for h in H.values()]
+    for n, pn in enumerate(psel):
+        r = [row(h, pn, a.cor_min) for h in H.values()]
         oo = np.concatenate([x[0] for x in r]); ii_ = np.concatenate([x[1] for x in r])
         if np.isfinite(oo).any():
             co[n], ci[n] = np.nanmedian(oo), np.nanmedian(ii_)
@@ -125,8 +153,8 @@ def main(iargs=None):
         if a.ion == 'none':
             SL[sw] = np.full(npx, np.nan, np.float32); M[sw] = np.zeros(npx, bool); continue
         sxy = np.zeros(npx); sxx = np.zeros(npx)
-        for n in range(npair):
-            o, io, _ = row(h, n, a.cor_min)
+        for n, pn in enumerate(psel):
+            o, io, _ = row(h, pn, a.cor_min)
             x = io - ci[n]; y = o - co[n]; ok = np.isfinite(x) & np.isfinite(y)
             sxy[ok] += x[ok] * y[ok]; sxx[ok] += x[ok] ** 2
         lab = bins_of(h, a.ion_bin)
@@ -139,10 +167,10 @@ def main(iargs=None):
 
     # pass 3: per-pair scene constants of b = o - M iota
     c = np.full(npair, np.nan)
-    for n in range(npair):
+    for n, pn in enumerate(psel):
         bb = []
         for sw, h in H.items():
-            o, io, _ = row(h, n, a.cor_min)
+            o, io, _ = row(h, pn, a.cor_min)
             bb.append(o - np.where(M[sw], io, 0))
         bb = np.concatenate(bb)
         if np.isfinite(bb).any():
@@ -153,7 +181,7 @@ def main(iargs=None):
     tb = t - t.mean(); stt = (tb ** 2).sum()
 
     def solve(w, bb):
-        N = (w @ P).reshape(-1, m, m) + R
+        N = (np.asarray((P.T @ w.T).T) if sparse.issparse(P) else w @ P).reshape(-1, m, m) + R
         x = np.linalg.solve(N, (bb @ Ar)[:, :, None])[:, :, 0]
         d = np.zeros((w.shape[0], nd)); d[:, keep] = x
         return d
@@ -161,19 +189,22 @@ def main(iargs=None):
     for sw, h in H.items():
         T0 = time.time()
         npx = h['o'].shape[1]
-        Bs = np.empty((npair, npx), np.float32); csum = np.zeros(npx); cnum = np.zeros(npx)
-        for n in range(npair):
-            o, io, cr = row(h, n, a.cor_min)
-            Bs[n] = o - np.where(M[sw], io, 0) - c[n]
-            ok = np.isfinite(Bs[n]); csum[ok] += cr[ok]; cnum[ok] += 1
-        W = np.isfinite(Bs)
+        csum = np.zeros(npx); cnum = np.zeros(npx)
         F = 2 * np.pi * DT * h['freq_hz'][:]                                       # rad per line
         V = np.full(npx, np.nan); S = np.full(npx, np.nan); G = np.full(npx, np.nan); NP = np.zeros(npx, int)
-        idx = np.where(W.sum(0) >= a.min_pairs)[0]
-        for k in range(0, idx.size, a.chunk):
-            ii = idx[k:k + a.chunk]
-            w = W[:, ii].T.astype(np.float64)
-            bb = np.where(W[:, ii], Bs[:, ii], 0).T.astype(np.float64)
+        for p0 in range(0, npx, a.block):
+          p1 = min(npx, p0 + a.block)
+          Bs = np.empty((npair, p1 - p0), np.float32)
+          for n, pn in enumerate(psel):
+            o, io, cr = row(h, pn, a.cor_min)
+            Bs[n] = (o - np.where(M[sw], io, 0))[p0:p1] - c[n]
+            ok = np.isfinite(Bs[n]); csum[p0:p1][ok] += cr[p0:p1][ok]; cnum[p0:p1][ok] += 1
+          W = np.isfinite(Bs)
+          idx = np.where(W.sum(0) >= a.min_pairs)[0]
+          for k in range(0, idx.size, a.chunk):
+            jj = idx[k:k + a.chunk]; ii = jj + p0
+            w = W[:, jj].T.astype(np.float64)
+            bb = np.where(W[:, jj], Bs[:, jj], 0).T.astype(np.float64)
             d = solve(w, bb)
             r = np.where(w > 0, bb - d @ A.T, np.nan)
             med = np.nanmedian(r, 1, keepdims=True)
@@ -187,11 +218,12 @@ def main(iargs=None):
             v = (d - d.mean(1, keepdims=True)) @ tb / stt
             res = d - d.mean(1, keepdims=True) - v[:, None] * tb[None, :]
             V[ii] = v; S[ii] = res.std(1, ddof=2) / np.sqrt(stt)
+          del Bs, W
+          print(f'  IW{sw} pixels {p1}/{npx} ({time.time() - T0:.0f} s)', flush=True)
         dx = h['dx_az'][:]
         vmm, smm = V * dx * 1e3, S * dx * 1e3
         good = np.isfinite(vmm) & (G >= a.gt_min) & (NP >= a.min_pairs)
         cor = np.where(cnum > 0, csum / np.maximum(cnum, 1), np.nan)
-        del Bs, W
         vout = np.where(good, vmm, np.nan)
         with h5py.File(f'{out}/boi_vel_IW{sw}_{tag}.h5', 'w') as g:
             for k_, v_ in dict(lon=h['lon'][:], lat=h['lat'][:], v=vout.astype(np.float32),
@@ -201,7 +233,7 @@ def main(iargs=None):
                                dates=h['dates'][:]).items():
                 g[k_] = v_
             g.attrs.update(ion=a.ion, cor_min=a.cor_min, gt_min=a.gt_min, kmad=a.kmad, min_pairs=a.min_pairs,
-                           ion_bin=a.ion_bin, ion_tol=a.ion_tol, damp=a.damp, ref_date=ref,
+                           ion_bin=a.ion_bin, ion_tol=a.ion_tol, damp=a.damp, ref_date=str(ref), t0=str(dates[0]), t1=str(dates[-1]),
                            units='mm/yr along track; sign [verify]')
         lat = h['lat'][:]
         txt.append(np.c_[h['lon'][:][good], lat[good], vmm[good], smm[good]])
