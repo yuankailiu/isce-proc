@@ -38,8 +38,11 @@ def _ionqc_lists(c, tmp):
         if run else set()
     lists = {'EXCLUDE': [r['pair'] for r in rows if r.get('status', '').startswith('exclude')],
              'CHECK': [r['pair'] for r in rows if r.get('status', '') == 'check']}
-    lists['EXCLUDE'] = sorted(set(lists['EXCLUDE']) | exc)
-    lists['CHECK'] = [p for p in lists['CHECK'] if p not in exc]
+    if exc:      # a decision is applied (run_24): red = what is excluded, ionqc proposals not taken -> orange
+        lists['CHECK'] = sorted((set(lists['CHECK']) | set(lists['EXCLUDE'])) - exc)
+        lists['EXCLUDE'] = sorted(exc)
+    else:
+        lists['CHECK'] = [p for p in lists['CHECK'] if p not in exc]
     out = {}
     for key, pairs in lists.items():
         out[key] = os.path.join(tmp, key.lower() + '.txt')
