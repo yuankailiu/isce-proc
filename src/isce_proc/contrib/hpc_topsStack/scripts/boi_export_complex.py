@@ -89,9 +89,10 @@ def main(iargs=None):
             v = v[sel]
             if n < 3:
                 ok = np.isfinite(o_chk[n]) & (v != 0)
-                err = np.nanmax(np.abs(np.angle(v[ok]) / F[ok] - o_chk[n][ok]))
-                print(f'check {p}: max |angle(phi)/F - o| = {err:.2e} lines ({ok.sum()} pixels)', flush=True)
-                assert err < 1e-6, 'complex export does not reproduce o'
+                e = np.abs(np.angle(v[ok]) / F[ok] - o_chk[n][ok]); err = np.nanmax(e)
+                print(f'check {p}: |angle(phi)/F - o| max {err:.2e}, median {np.nanmedian(e):.1e} lines '
+                      f'({ok.sum()} pixels; float32 rounding, 1e-5 lines = 0.14 mm)', flush=True)
+                assert err < 1e-5, 'complex export does not reproduce o'
             d[n] = v
             if n % 500 == 0:
                 print(f'  {n + 1}/{npair} ({time.time() - T0:.0f} s)', flush=True)
