@@ -56,6 +56,11 @@ def rules(zip_vrt, virtual, ion):
                             'timeseries_misreg', 'overlap SLCs and offsets (ESD)'),
         'esd':             ([f'ESD/*/IW*/*.{e}' for e in ('int', 'bin', 'cor', 'off')],
                             'timeseries_misreg', 'ESD files'),
+        # BOI tracks: keep the 5 x 15-look ESD overlap .int/.cor and freq_XX.5alks_15rlks.bin (read by boi_pairs.py)
+        'esd_fullres':     (['ESD/*/IW*/overlap_[0-9][0-9].int', 'ESD/*/IW*/freq_[0-9][0-9].bin',
+                             'ESD/*/IW*/combined.int', 'ESD/*/IW*/combined.cor', 'ESD/*/IW*/combined.off',
+                             'ESD/*/IW*/combined_freq.bin'],
+                            'timeseries_misreg', 'full-resolution ESD files (multilooked 5alks_15rlks ones kept)'),
         'coarse_igram':    (['coarse_interferograms/*/overlap/IW*/int_*.int'],
                             'timeseries_misreg', 'coarse overlap interferograms (ESD)'),
         'geom_reference':  (['geom_reference/IW*/*.rdr'],
